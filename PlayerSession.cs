@@ -3,8 +3,10 @@ using System.Buffers;
 using System.IO.Pipelines;
 using System.Net.Sockets;
 using System.Text;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using Microsoft.Extensions.Logging;
 
 public sealed class PlayerSession : IDisposable
 {
@@ -86,56 +88,62 @@ public sealed class PlayerSession : IDisposable
             var messageText = Encoding.UTF8.GetString(message.ToArray());
             _server.Logger.LogDebug("🔍 Processing message from {SessionId}: '{Message}'", Id, messageText);
             
-            // Simple protocol parsing
-            var parts = messageText.Split('|');
-            if (parts.Length < 1) return;
-            
-            var command = parts[0].ToUpper();
+            // Parse JSON message
+            var jsonMessage = JsonSerializer.Deserialize<JsonElement>(messageText);
+            if (!jsonMessage.TryGetProperty("command", out var commandElement))
+                return;
+                
+            var command = commandElement.GetString()?.ToUpper();
+            if (string.IsNullOrEmpty(command)) return;
             
             switch (command)
             {
                 case "NAME":
-                    if (parts.Length > 1)
+                    if (jsonMessage.TryGetProperty("name", out var nameElement))
                     {
-                        PlayerName = parts[1];
+                        PlayerName = nameElement.GetString() ?? "Anonymous";
                         _server.Logger.LogInformation("👤 Player {SessionId} set name to '{Name}'", Id, PlayerName);
-                        await SendTextAsync($"NAME_OK|{PlayerName}\n", ct);
+                        await SendJsonAsync(new { command = "NAME_OK", name = PlayerName }, ct);
                     }
                     break;
                     
                 case "JOIN_ROOM":
-                    if (parts.Length > 1)
+                    if (jsonMessage.TryGetProperty("roomId", out var roomIdElement))
                     {
+                        var roomId = roomIdElement.GetString() ?? string.Empty;
                         _server.Logger.LogInformation("👤 Player {SessionId} ({Name}) attempting to join room {RoomId}", 
-                            Id, PlayerName, parts[1]);
+                            Id, PlayerName, roomId);
                         // TODO: Implement room joining logic
-                        await SendTextAsync($"JOIN_OK|{parts[1]}\n", ct);
+                        await SendJsonAsync(new { command = "JOIN_OK", roomId }, ct);
                     }
                     break;
                     
                 case "CREATE_ROOM":
-                    if (parts.Length > 1)
+                    if (jsonMessage.TryGetProperty("name", out var roomNameElement))
                     {
-                        var roomName = parts[1];
+                        var roomName = roomNameElement.GetString() ?? "Race Room";
                         var room = _server.CreateRoom(roomName, Id);
                         CurrentRoomId = room.Id;
                         _server.Logger.LogInformation("👤 Player {SessionId} ({Name}) created room '{RoomName}' ({RoomId})", 
                             Id, PlayerName, roomName, room.Id);
-                        await SendTextAsync($"ROOM_CREATED|{room.Id}|{roomName}\n", ct);
+                        await SendJsonAsync(new { command = "ROOM_CREATED", roomId = room.Id, name = roomName }, ct);
                     }
                     break;
                     
                 case "PING":
-                    await SendTextAsync("PONG\n", ct);
+                    await SendJsonAsync(new { command = "PONG" }, ct);
                     break;
                     
                 default:
                     _server.Logger.LogWarning("⚠️ Unknown command from {SessionId}: {Command}", Id, command);
-                    await SendTextAsync($"UNKNOWN_COMMAND|{command}\n", ct);
+                    await SendJsonAsync(new { command = "UNKNOWN_COMMAND", originalCommand = command }, ct);
                     break;
             }
-            
-            await Task.CompletedTask;
+        }
+        catch (JsonException ex)
+        {
+            _server.Logger.LogError(ex, "❌ JSON parsing error for session {SessionId}", Id);
+            await SendJsonAsync(new { command = "ERROR", message = "Invalid JSON format" }, ct);
         }
         catch (Exception ex)
         {
@@ -161,6 +169,13 @@ public sealed class PlayerSession : IDisposable
     {
         var bytes = Encoding.UTF8.GetBytes(text);
         await SendAsync(bytes, ct);
+    }
+
+    public async Task SendJsonAsync<T>(T message, CancellationToken ct = default)
+    {
+        var json = JsonSerializer.Serialize(message);
+        json += "\n"; // Keep the newline delimiter for message framing
+        await SendTextAsync(json, ct);
     }
 
     public async Task DisconnectAsync()
