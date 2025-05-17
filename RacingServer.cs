@@ -251,4 +251,15 @@ public sealed class RacingServer : IHostedService, IDisposable
     {
         return _rooms.Values.Where(r => r.IsActive).ToList().AsReadOnly();
     }
+
+    public IReadOnlyCollection<GameRoom> GetAllRooms()
+    {
+        return _rooms.Values.ToList().AsReadOnly();
+    }
+
+    public PlayerSession? GetPlayerSession(string sessionId)
+    {
+        _sessions.TryGetValue(sessionId, out var session);
+        return session;
+    }
 }

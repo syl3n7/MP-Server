@@ -33,15 +33,18 @@ Ports (defaults):
 
 | Command        | Direction    | Payload (JSON)                                    | Response (JSON)                         |
 | -------------- | ------------ | ------------------------------------------------- | --------------------------------------- |
-| `NAME`         | Client → Srv | `{"command":"NAME","name":"playerName"}\n`        | `{"command":"NAME_OK","name":"playerName"}\n` |
-| `CREATE_ROOM`  | Client → Srv | `{"command":"CREATE_ROOM","name":"roomName"}\n`   | `{"command":"ROOM_CREATED","roomId":"id","name":"roomName"}\n` |
-| `JOIN_ROOM`    | Client → Srv | `{"command":"JOIN_ROOM","roomId":"id"}\n`         | `{"command":"JOIN_OK","roomId":"id"}\n` |
-| `PING`         | Client → Srv | `{"command":"PING"}\n`                            | `{"command":"PONG"}\n`                  |
-| Any other      | Client → Srv | e.g. `{"command":"FOO"}\n`                        | `{"command":"UNKNOWN_COMMAND","originalCommand":"FOO"}\n` |
+| `NAME`         | Client → Srv | `{"command":"NAME","name":"playerName"}`        | `{"command":"NAME_OK","name":"playerName"}` |
+| `CREATE_ROOM`  | Client → Srv | `{"command":"CREATE_ROOM","name":"roomName"}`   | `{"command":"ROOM_CREATED","roomId":"id","name":"roomName"}` |
+| `JOIN_ROOM`    | Client → Srv | `{"command":"JOIN_ROOM","roomId":"id"}`         | `{"command":"JOIN_OK","roomId":"id"}` |
+| `PING`         | Client → Srv | `{"command":"PING"}`                            | `{"command":"PONG"}`                  |
+| `LIST_ROOMS`   | Client → Srv | `{"command":"LIST_ROOMS"}`                     | `{"command":"ROOM_LIST","rooms":[{"id":"id","name":"roomName","playerCount":0,"isActive":false}]}` |
+| `PLAYER_INFO`  | Client → Srv | `{"command":"PLAYER_INFO"}`                    | `{"command":"PLAYER_INFO","playerInfo":{"id":"id","name":"playerName","currentRoomId":"roomId"}}` |
+| `START_GAME`   | Client → Srv | `{"command":"START_GAME"}`                     | `{"command":"GAME_STARTED","roomId":"roomId"}` or `{"command":"ERROR","message":"Cannot start game. No room joined or room not found."}` |
+| Any other      | Client → Srv | e.g. `{"command":"FOO"}`                        | `{"command":"UNKNOWN_COMMAND","originalCommand":"FOO"}` |
 
 #### Error Handling
-- Malformed JSON commands return `{"command":"ERROR","message":"Invalid JSON format"}\n`.
-- Unrecognized commands return `{"command":"UNKNOWN_COMMAND","originalCommand":"cmd"}\n`.
+- Malformed JSON commands return `{"command":"ERROR","message":"Invalid JSON format"}`.
+- Unrecognized commands return `{"command":"UNKNOWN_COMMAND","originalCommand":"cmd"}`.
 - If server detects inactivity (>60 s without messages), it will close the TCP socket.
 
 ## 4. UDP Protocol

@@ -35,4 +35,9 @@ public sealed class GameRoom
     }
     
     public int PlayerCount => _players.Count;
+
+    public void StartGame()
+    {
+        IsActive = true;
+    }
 }

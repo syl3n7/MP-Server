@@ -133,6 +133,28 @@ public sealed class PlayerSession : IDisposable
                 case "PING":
                     await SendJsonAsync(new { command = "PONG" }, ct);
                     break;
+
+                case "LIST_ROOMS":
+                    var rooms = _server.GetAllRooms().Select(r => new { r.Id, r.Name, r.PlayerCount, r.IsActive });
+                    await SendJsonAsync(new { command = "ROOM_LIST", rooms }, ct);
+                    break;
+
+                case "PLAYER_INFO":
+                    var playerInfo = new { Id, PlayerName, CurrentRoomId };
+                    await SendJsonAsync(new { command = "PLAYER_INFO", playerInfo }, ct);
+                    break;
+
+                case "START_GAME":
+                    if (CurrentRoomId != null && _server.GetActiveRooms().FirstOrDefault(r => r.Id == CurrentRoomId) is GameRoom room)
+                    {
+                        room.StartGame();
+                        await SendJsonAsync(new { command = "GAME_STARTED", roomId = room.Id }, ct);
+                    }
+                    else
+                    {
+                        await SendJsonAsync(new { command = "ERROR", message = "Cannot start game. No room joined or room not found." }, ct);
+                    }
+                    break;
                     
                 default:
                     _server.Logger.LogWarning("⚠️ Unknown command from {SessionId}: {Command}", Id, command);
