@@ -29,6 +29,9 @@ public sealed class RacingServer : IHostedService, IDisposable
     private Task? _tcpAcceptTask;
     private Task? _udpReceiveTask;
     private Task? _heartbeatTask;
+
+    // Server info
+    public DateTime StartTime { get; private set; }
     
     public RacingServer(int tcpPort, int udpPort, ILogger<RacingServer>? logger = null)
     {
@@ -39,6 +42,9 @@ public sealed class RacingServer : IHostedService, IDisposable
 
     public async Task StartAsync(CancellationToken cancellationToken = default)
     {
+        // Set the start time
+        StartTime = DateTime.UtcNow;
+        
         // TCP Listener
         _tcpListener = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
         _tcpListener.Bind(new IPEndPoint(IPAddress.Any, _tcpPort));
@@ -194,10 +200,16 @@ public sealed class RacingServer : IHostedService, IDisposable
                 commandElement.GetString() == "UPDATE" &&
                 root.TryGetProperty("sessionId", out JsonElement sessionIdElement))
             {
-                string sessionId = sessionIdElement.GetString();
+                string? sessionId = sessionIdElement.GetString();
+                
+                if (string.IsNullOrEmpty(sessionId))
+                {
+                    _logger.LogWarning("⚠️ Received UDP update with empty sessionId");
+                    return;
+                }
                 
                 // Update player UDP endpoint if it's our first packet from this player
-                if (_sessions.TryGetValue(sessionId, out PlayerSession session) && session.CurrentRoomId != null)
+                if (_sessions.TryGetValue(sessionId, out PlayerSession? session) && session?.CurrentRoomId != null)
                 {
                     // Create player info with UDP endpoint
                     var playerInfo = new PlayerInfo(
@@ -209,14 +221,14 @@ public sealed class RacingServer : IHostedService, IDisposable
                     );
                     
                     // Find the room and update player info
-                    if (_rooms.TryGetValue(session.CurrentRoomId, out GameRoom room))
+                    if (_rooms.TryGetValue(session.CurrentRoomId, out GameRoom? room) && room != null)
                     {
                         // Update player in room with new position info
                         room.TryRemovePlayer(sessionId);
                         room.TryAddPlayer(playerInfo);
                         
                         // Broadcast to all other players in the same room
-                        BroadcastPositionUpdate(playerInfo, session.CurrentRoomId, sessionId);
+                        await BroadcastPositionUpdateAsync(playerInfo, session.CurrentRoomId, sessionId);
                     }
                 }
             }
@@ -264,7 +276,7 @@ public sealed class RacingServer : IHostedService, IDisposable
         return Quaternion.Identity;
     }
 
-    private void BroadcastPositionUpdate(PlayerInfo playerInfo, string roomId, string senderId)
+    private async Task BroadcastPositionUpdateAsync(PlayerInfo playerInfo, string roomId, string senderId)
     {
         if (_rooms.TryGetValue(roomId, out GameRoom room))
         {
@@ -291,7 +303,7 @@ public sealed class RacingServer : IHostedService, IDisposable
                     byte[] bytes = Encoding.UTF8.GetBytes(json);
                     
                     // Send the update to the player
-                    _udpListener.SendToAsync(bytes, player.UdpEndpoint);
+                    await _udpListener.SendToAsync(bytes, player.UdpEndpoint);
                     
                     _logger.LogDebug("📤 Broadcast position update from {SenderId} to {ReceiverId}", senderId, player.Id);
                 }
@@ -375,5 +387,10 @@ public sealed class RacingServer : IHostedService, IDisposable
     {
         _sessions.TryGetValue(sessionId, out var session);
         return session;
+    }
+
+    public IReadOnlyCollection<PlayerSession> GetAllSessions()
+    {
+        return _sessions.Values.ToList().AsReadOnly();
     }
 }

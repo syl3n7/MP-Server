@@ -1,152 +1,136 @@
 using System;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Collections.Generic;
+using System.Linq;
 
 public class ConsoleUI
 {
     private readonly RacingServer _server;
-    private readonly CancellationTokenSource _cts;
-    
-    public ConsoleUI(RacingServer server, CancellationTokenSource cts)
+    private readonly CancellationTokenSource _serverCts;
+
+    public ConsoleUI(RacingServer server, CancellationTokenSource serverCts)
     {
         _server = server;
-        _cts = cts;
+        _serverCts = serverCts;
     }
-    
+
     public async Task RunAsync(CancellationToken ct)
     {
-        Console.WriteLine("Racing Server Console UI");
-        Console.WriteLine("------------------------");
+        Console.WriteLine("Racing Server Console");
+        Console.WriteLine("=====================");
         PrintHelp();
-        
+
         while (!ct.IsCancellationRequested)
         {
             Console.Write("> ");
-            var command = await Task.Run(() => Console.ReadLine(), ct);
-            
-            if (string.IsNullOrEmpty(command))
+            var input = await Task.Run(() => Console.ReadLine(), ct);
+
+            if (string.IsNullOrWhiteSpace(input))
                 continue;
-                
-            await ProcessCommandAsync(command, ct);
+
+            var command = input.Trim().ToLower();
+            
+            switch (command)
+            {
+                case "help":
+                    PrintHelp();
+                    break;
+                    
+                case "rooms":
+                    ListRooms();
+                    break;
+                    
+                case "sessions":
+                    ListSessions();
+                    break;
+                    
+                case "stats":
+                    ShowStats();
+                    break;
+                    
+                case "quit":
+                case "exit":
+                    Console.WriteLine("Shutting down server...");
+                    _serverCts.Cancel();
+                    return;
+                    
+                default:
+                    Console.WriteLine("Unknown command. Type 'help' for available commands.");
+                    break;
+            }
         }
     }
-    
-    private async Task ProcessCommandAsync(string command, CancellationToken ct)
-    {
-        var args = command.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-        var cmd = args[0].ToLower();
-        
-        switch (cmd)
-        {
-            case "help":
-                PrintHelp();
-                break;
-                
-            case "stats":
-                PrintStats();
-                break;
-                
-            case "rooms":
-                PrintRooms();
-                break;
-                
-            case "players":
-                PrintPlayers();
-                break;
-                
-            case "cleardead":
-                // Not implemented yet
-                Console.WriteLine("Not implemented");
-                break;
-                
-            case "quit":
-            case "exit":
-                Console.WriteLine("Shutting down server...");
-                _cts.Cancel();
-                break;
-                
-            default:
-                Console.WriteLine("Unknown command. Type 'help' for a list of commands.");
-                break;
-        }
-    }
-    
+
     private void PrintHelp()
     {
         Console.WriteLine("Available commands:");
-        Console.WriteLine("  help      - Show this help message");
-        Console.WriteLine("  stats     - Show server statistics");
-        Console.WriteLine("  rooms     - List all active rooms");
-        Console.WriteLine("  players   - List all connected players");
-        Console.WriteLine("  cleardead - Remove inactive rooms");
-        Console.WriteLine("  exit      - Shutdown the server");
+        Console.WriteLine("  help     - Show this help message");
+        Console.WriteLine("  rooms    - List all game rooms");
+        Console.WriteLine("  sessions - List all active player sessions");
+        Console.WriteLine("  stats    - Show server statistics");
+        Console.WriteLine("  quit     - Shut down the server");
     }
-    
-    private void PrintStats()
-    {
-        var allRooms = _server.GetAllRooms();
-        var activeRooms = _server.GetActiveRooms();
-        
-        int totalPlayers = 0;
-        foreach (var room in allRooms)
-        {
-            totalPlayers += room.PlayerCount;
-        }
-        
-        Console.WriteLine($"Server Statistics:");
-        Console.WriteLine($"- Total rooms: {allRooms.Count}");
-        Console.WriteLine($"- Active rooms: {activeRooms.Count}");
-        Console.WriteLine($"- Connected players: {totalPlayers}");
-    }
-    
-    private void PrintRooms()
+
+    private void ListRooms()
     {
         var rooms = _server.GetAllRooms();
         
         if (rooms.Count == 0)
         {
-            Console.WriteLine("No rooms available.");
+            Console.WriteLine("No active rooms.");
             return;
         }
         
-        Console.WriteLine("Room List:");
-        Console.WriteLine("-------------------------------------------------------------------------");
-        Console.WriteLine("| ID                 | Name             | Players | Status  | Host     |");
-        Console.WriteLine("-------------------------------------------------------------------------");
+        Console.WriteLine($"Total rooms: {rooms.Count}");
+        Console.WriteLine("ID                               | Name                | Players | Active | Host");
+        Console.WriteLine("----------------------------------|---------------------|---------|--------|----------------------------------");
         
         foreach (var room in rooms)
         {
-            var status = room.IsActive ? "Active" : "Waiting";
-            Console.WriteLine($"| {room.Id.PadRight(18)} | {room.Name.PadRight(16)} | {room.PlayerCount,7} | {status,-7} | {room.HostId?.Substring(0, 6) ?? "None"} |");
+            Console.WriteLine($"{room.Id,-34} | {TruncateString(room.Name, 19),-19} | {room.PlayerCount,7} | {(room.IsActive ? "Yes" : "No"),6} | {TruncateString(room.HostId ?? "none", 34)}");
         }
-        
-        Console.WriteLine("-------------------------------------------------------------------------");
     }
-    
-    private void PrintPlayers()
+
+    private void ListSessions()
     {
+        var sessions = _server.GetAllSessions();
+        
+        if (sessions.Count == 0)
+        {
+            Console.WriteLine("No active sessions.");
+            return;
+        }
+        
+        Console.WriteLine($"Total active sessions: {sessions.Count}");
+        Console.WriteLine("ID                               | Name                | In Room | Last Activity");
+        Console.WriteLine("----------------------------------|---------------------|---------|-------------------------");
+        
+        foreach (var session in sessions)
+        {
+            Console.WriteLine($"{session.Id,-34} | {TruncateString(session.PlayerName, 19),-19} | {(string.IsNullOrEmpty(session.CurrentRoomId) ? "No" : "Yes"),7} | {session.LastActivity.ToLocalTime()}");
+        }
+    }
+
+    private void ShowStats()
+    {
+        var sessions = _server.GetAllSessions();
         var rooms = _server.GetAllRooms();
-        int totalPlayers = 0;
         
-        Console.WriteLine("Connected Players:");
-        Console.WriteLine("----------------------------------------------------------------");
-        Console.WriteLine("| ID                 | Name             | Room             |");
-        Console.WriteLine("----------------------------------------------------------------");
-        
-        foreach (var room in rooms)
-        {
-            foreach (var player in room.Players)
-            {
-                Console.WriteLine($"| {player.Id.PadRight(18)} | {player.Name.PadRight(16)} | {room.Name.PadRight(16)} |");
-                totalPlayers++;
-            }
-        }
-        
-        if (totalPlayers == 0)
-        {
-            Console.WriteLine("| No players currently connected                              |");
-        }
-        
-        Console.WriteLine("----------------------------------------------------------------");
+        Console.WriteLine("Server Statistics");
+        Console.WriteLine("-----------------");
+        Console.WriteLine($"Server Uptime: {DateTime.UtcNow - _server.StartTime}");
+        Console.WriteLine($"Active Sessions: {sessions.Count}");
+        Console.WriteLine($"Total Rooms: {rooms.Count}");
+        Console.WriteLine($"Active Games: {rooms.Count(r => r.IsActive)}");
+        Console.WriteLine($"Players In Rooms: {rooms.Sum(r => r.PlayerCount)}");
+    }
+
+    private string TruncateString(string str, int maxLength)
+    {
+        if (string.IsNullOrEmpty(str))
+            return string.Empty;
+            
+        return str.Length <= maxLength ? str : str.Substring(0, maxLength - 3) + "...";
     }
 }

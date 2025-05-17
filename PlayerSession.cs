@@ -112,10 +112,10 @@ public sealed class PlayerSession : IDisposable
                     if (jsonMessage.TryGetProperty("roomId", out var roomIdElement))
                     {
                         var roomId = roomIdElement.GetString() ?? string.Empty;
-                        if (_server.GetAllRooms().FirstOrDefault(r => r.Id == roomId) is GameRoom room)
+                        if (_server.GetAllRooms().FirstOrDefault(r => r.Id == roomId) is GameRoom targetRoom)
                         {
                             var newPlayerInfo = new PlayerInfo(Id, PlayerName, null, new Vector3(), new Quaternion());
-                            if (room.TryJoinRoom(Id, newPlayerInfo))
+                            if (targetRoom.TryJoinRoom(Id, newPlayerInfo))
                             {
                                 CurrentRoomId = roomId;
                                 _server.Logger.LogInformation("👤 Player {SessionId} ({Name}) joined room {RoomId}", Id, PlayerName, roomId);
@@ -136,12 +136,12 @@ public sealed class PlayerSession : IDisposable
                 case "CREATE_ROOM":
                     if (jsonMessage.TryGetProperty("name", out var roomNameElement))
                     {
-                        var roomName = roomNameElement.GetString() ?? "Race Room";
-                        var room = _server.CreateRoom(roomName, Id);
-                        CurrentRoomId = room.Id;
+                        var newRoomName = roomNameElement.GetString() ?? "Race Room";
+                        var newRoom = _server.CreateRoom(newRoomName, Id);
+                        CurrentRoomId = newRoom.Id;
                         _server.Logger.LogInformation("👤 Player {SessionId} ({Name}) created room '{RoomName}' ({RoomId})", 
-                            Id, PlayerName, roomName, room.Id);
-                        await SendJsonAsync(new { command = "ROOM_CREATED", roomId = room.Id, name = roomName }, ct);
+                            Id, PlayerName, newRoomName, newRoom.Id);
+                        await SendJsonAsync(new { command = "ROOM_CREATED", roomId = newRoom.Id, name = newRoomName }, ct);
                     }
                     break;
                     
@@ -217,11 +217,31 @@ public sealed class PlayerSession : IDisposable
                     // But for simplicity, we'll just remove the player and let the room continue if it's active
                     bool wasHost = room.HostId == Id;
                     string roomName = room.Name;
+                    string previousRoomId = CurrentRoomId;
                     
                     // Remove player from room
                     room.TryRemovePlayer(Id);
-                    string previousRoomId = CurrentRoomId;
                     CurrentRoomId = null;
+                    
+                    // If the player was the host and the room is now empty, remove the room
+                    if (wasHost && room.PlayerCount == 0 && !room.IsActive)
+                    {
+                        _server.RemoveRoom(previousRoomId);
+                        _server.Logger.LogInformation("🏁 Room '{RoomName}' ({RoomId}) was removed as the host left and it was empty", 
+                            roomName, previousRoomId);
+                    }
+                    // If the player was the host but there are still players, transfer host status
+                    else if (wasHost && room.PlayerCount > 0)
+                    {
+                        // Transfer host status to the first remaining player
+                        var newHost = room.Players.FirstOrDefault();
+                        if (newHost != null)
+                        {
+                            room.HostId = newHost.Id;
+                            _server.Logger.LogInformation("👑 Host status transferred from {OldHostId} to {NewHostId} in room '{RoomName}' ({RoomId})",
+                                Id, newHost.Id, roomName, previousRoomId);
+                        }
+                    }
                     
                     _server.Logger.LogInformation("👤 Player {SessionId} ({Name}) left room '{RoomName}' ({RoomId})", 
                         Id, PlayerName, roomName, previousRoomId);
