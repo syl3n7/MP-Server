@@ -269,12 +269,33 @@ public sealed class PlayerSession : IDisposable
                     gameRoom.StartGame();
                     _server.Logger.LogInformation("🎮 Game started in room {RoomId} by host {HostId}", CurrentRoomId, Id);
                     
-                    // Broadcast game start to all players in the room
-                    var gameStartedMessage = new { command = "GAME_STARTED", roomId = CurrentRoomId, hostId = Id };
+                    // Collect spawn positions for all players
+                    var playerSpawnPositions = new Dictionary<string, object>();
+                    foreach (var player in gameRoom.Players)
+                    {
+                        var spawnPos = gameRoom.GetPlayerSpawnPosition(player.Id);
+                        playerSpawnPositions[player.Id] = new { 
+                            x = spawnPos.X, 
+                            y = spawnPos.Y, 
+                            z = spawnPos.Z 
+                        };
+                    }
+                    
+                    // Broadcast game start to all players in the room with spawn positions
+                    var gameStartedMessage = new { 
+                        command = "GAME_STARTED", 
+                        roomId = CurrentRoomId, 
+                        hostId = Id,
+                        spawnPositions = playerSpawnPositions
+                    };
                     await _server.BroadcastToRoomAsync(CurrentRoomId, gameStartedMessage, ct);
                     
                     // Still send a direct response to the host
-                    await SendJsonAsync(new { command = "GAME_STARTED", roomId = CurrentRoomId }, ct);
+                    await SendJsonAsync(new { 
+                        command = "GAME_STARTED", 
+                        roomId = CurrentRoomId,
+                        spawnPositions = playerSpawnPositions
+                    }, ct);
                     break;
                     
                 case "LEAVE_ROOM":

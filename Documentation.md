@@ -42,7 +42,7 @@ Ports (defaults):
 | `GET_ROOM_PLAYERS` | Client → Srv | `{"command":"GET_ROOM_PLAYERS"}`          | `{"command":"ROOM_PLAYERS","roomId":"id","players":[{"id":"playerId","name":"playerName"}]}` or `{"command":"ERROR","message":"Cannot get players. No room joined."}` |
 | `RELAY_MESSAGE` | Client → Srv | `{"command":"RELAY_MESSAGE","targetId":"playerId","message":"text"}` | `{"command":"RELAY_OK","targetId":"playerId"}` or `{"command":"ERROR","message":"Target player not found."}` |
 | `PLAYER_INFO`  | Client → Srv | `{"command":"PLAYER_INFO"}`                    | `{"command":"PLAYER_INFO","playerInfo":{"id":"id","name":"playerName","currentRoomId":"roomId"}}` |
-| `START_GAME`   | Client → Srv | `{"command":"START_GAME"}`                     | `{"command":"GAME_STARTED","roomId":"roomId"}` or `{"command":"ERROR","message":"Cannot start game. Only the host can start the game."}` |
+| `START_GAME`   | Client → Srv | `{"command":"START_GAME"}`                     | `{"command":"GAME_STARTED","roomId":"roomId","spawnPositions":{"playerId1":{"x":66,"y":-2,"z":0.8},"playerId2":{"x":60,"y":-2,"z":0.8}}}` or `{"command":"ERROR","message":"Cannot start game. Only the host can start the game."}` |
 | `BYE`          | Client → Srv | `{"command":"BYE"}`                            | `{"command":"BYE_OK"}` |
 | Any other      | Client → Srv | e.g. `{"command":"FOO"}`                        | `{"command":"UNKNOWN_COMMAND","originalCommand":"FOO"}` |
 
@@ -52,7 +52,7 @@ The server may also send these messages without a direct client request:
 | Message | Purpose | Format |
 | ------- | ------- | ------ |
 | `RELAYED_MESSAGE` | Message relayed from another player | `{"command":"RELAYED_MESSAGE","senderId":"id","senderName":"name","message":"text"}` |
-| `GAME_STARTED` | Notification that a game has started | `{"command":"GAME_STARTED","roomId":"roomId","hostId":"hostId"}` |
+| `GAME_STARTED` | Notification that a game has started | `{"command":"GAME_STARTED","roomId":"roomId","hostId":"hostId","spawnPositions":{"playerId1":{"x":66,"y":-2,"z":0.8},"playerId2":{"x":60,"y":-2,"z":0.8}}}` |
 
 #### Error Handling
 - Malformed JSON commands return `{"command":"ERROR","message":"Invalid JSON format"}`.
@@ -312,7 +312,40 @@ The server maintains player information using the `PlayerInfo` record with the f
 
 This structure is used to track player state and share it with other players in the same room.
 
-### 7.3 Position and Rotation Updates
+### 7.3 Spawn Positions and Game Start
+When a host starts a game:
+1. The server assigns a spawn position to each player in the room
+2. The spawn positions are sent to all players as part of the `GAME_STARTED` notification
+3. Each player is assigned a unique garage position along the track (see predefined positions below)
+4. Clients should place each player's vehicle at their assigned spawn position
+
+Predefined spawn positions on the track:
+```
+Position 0:  (66, -2, 0.8)
+Position 1:  (60, -2, 0.8)
+Position 2:  (54, -2, 0.8)
+Position 3:  (47, -2, 0.8)
+Position 4:  (41, -2, 0.8)
+Position 5:  (35, -2, 0.8)
+Position 6:  (28, -2, 0.8)
+Position 7:  (22, -2, 0.8)
+Position 8:  (16, -2, 0.8)
+Position 9:  (9, -2, 0.8)
+Position 10: (3, -2, 0.8)
+Position 11: (-3, -2, 0.8)
+Position 12: (-9, -2, 0.8)
+Position 13: (-15, -2, 0.8)
+Position 14: (-22, -2, 0.8)
+Position 15: (-28, -2, 0.8)
+Position 16: (-34, -2, 0.8)
+Position 17: (-41, -2, 0.8)
+Position 18: (-47, -2, 0.8)
+Position 19: (-54, -2, 0.8)
+```
+
+The order of assignment depends on the order in which players joined the room, with earlier players getting lower position indices.
+
+### 7.4 Position and Rotation Updates
 Position updates use the following data flow:
 1. Client sends a position update via UDP
 2. Server associates the update with a player session
