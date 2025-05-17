@@ -38,7 +38,7 @@ Ports (defaults):
 | `JOIN_ROOM`    | Client → Srv | `{"command":"JOIN_ROOM","roomId":"id"}`         | `{"command":"JOIN_OK","roomId":"id"}` or `{"command":"ERROR","message":"Failed to join room. Room may be full or inactive."}` |
 | `LEAVE_ROOM`   | Client → Srv | `{"command":"LEAVE_ROOM"}`                      | `{"command":"LEAVE_OK","roomId":"id"}` or `{"command":"ERROR","message":"Cannot leave room. No room joined."}` |
 | `PING`         | Client → Srv | `{"command":"PING"}`                            | `{"command":"PONG"}`                  |
-| `LIST_ROOMS`   | Client → Srv | `{"command":"LIST_ROOMS"}`                     | `{"command":"ROOM_LIST","rooms":[{"id":"id","name":"roomName","playerCount":0,"isActive":false}]}` |
+| `LIST_ROOMS`   | Client → Srv | `{"command":"LIST_ROOMS"}`                     | `{"command":"ROOM_LIST","rooms":[{"id":"id","name":"roomName","playerCount":0,"isActive":false,"hostId":"hostId"}]}` |
 | `GET_ROOM_PLAYERS` | Client → Srv | `{"command":"GET_ROOM_PLAYERS"}`          | `{"command":"ROOM_PLAYERS","roomId":"id","players":[{"id":"playerId","name":"playerName"}]}` or `{"command":"ERROR","message":"Cannot get players. No room joined."}` |
 | `RELAY_MESSAGE` | Client → Srv | `{"command":"RELAY_MESSAGE","targetId":"playerId","message":"text"}` | `{"command":"RELAY_OK","targetId":"playerId"}` or `{"command":"ERROR","message":"Target player not found."}` |
 | `PLAYER_INFO`  | Client → Srv | `{"command":"PLAYER_INFO"}`                    | `{"command":"PLAYER_INFO","playerInfo":{"id":"id","name":"playerName","currentRoomId":"roomId"}}` |
@@ -52,6 +52,7 @@ The server may also send these messages without a direct client request:
 | Message | Purpose | Format |
 | ------- | ------- | ------ |
 | `RELAYED_MESSAGE` | Message relayed from another player | `{"command":"RELAYED_MESSAGE","senderId":"id","senderName":"name","message":"text"}` |
+| `GAME_STARTED` | Notification that a game has started | `{"command":"GAME_STARTED","roomId":"roomId","hostId":"hostId"}` |
 
 #### Error Handling
 - Malformed JSON commands return `{"command":"ERROR","message":"Invalid JSON format"}`.
@@ -301,15 +302,31 @@ class RacingClient
 - Inactivity timeout: Sessions with no activity for > 60 seconds are disconnected
 - Sessions track player name, current room, and last activity time
 
-### 7.2 Position Updates
-- Player position and rotation are tracked via the PlayerInfo record
-- Position is represented as Vector3 (x, y, z)
-- Rotation is represented as Quaternion (x, y, z, w)
+### 7.2 Player Information Structure
+The server maintains player information using the `PlayerInfo` record with the following properties:
+- `Id`: Unique player identifier (matches session ID)
+- `Name`: Display name of the player
+- `UdpEndpoint`: The IP:Port combination for UDP communication
+- `Position`: Player's 3D position in the game world as a Vector3
+- `Rotation`: Player's orientation in the game world as a Quaternion
 
-### 7.3 Message Relay
+This structure is used to track player state and share it with other players in the same room.
+
+### 7.3 Position and Rotation Updates
+Position updates use the following data flow:
+1. Client sends a position update via UDP
+2. Server associates the update with a player session
+3. Server updates the player's information in their current room
+4. Server broadcasts the update to all other players in the same room
+5. Clients receive updates for all other players and update their local game state
+
+The position is represented as a 3D vector (x, y, z) and rotation as a quaternion (x, y, z, w).
+
+### 7.4 Message Relay
 - Players can relay messages to other players using their session ID
 - Messages are delivered to the target player via TCP
 - The receiving player gets a `RELAYED_MESSAGE` command with the sender's ID, name, and message
+- This can be used for in-game chat, custom events, or game-specific commands
 
 ## 8. Host Transfer Mechanism
 When a host player leaves a room:
@@ -318,7 +335,23 @@ When a host player leaves a room:
 - The new host has the authority to start the game
 - No specific notification is sent when host status changes (clients should track this if needed)
 
-## 9. Logging & Debug
+## 9. Real-time Data Synchronization
+The server supports two types of real-time data that are synchronized between players:
+
+### 9.1 Position/Rotation Updates
+- Sent via UDP with the "UPDATE" command
+- Contains full position (Vector3) and rotation (Quaternion) data
+- Updated whenever the client sends a new position update
+- Distributed to all other players in the same room
+
+### 9.2 Input Controls
+- Sent via UDP with the "INPUT" command
+- Contains steering, throttle, brake values, and a timestamp
+- Used to synchronize vehicle control inputs between players
+- Can be used for physics prediction or deterministic simulation
+- The timestamp helps with lag compensation and input ordering
+
+## 10. Logging & Debug
 - TCP events (connect, disconnect, commands) are logged at INFO level
 - UDP packet receipt and processing are logged at DEBUG level
 - JSON parsing errors are caught and logged
@@ -327,7 +360,7 @@ When a host player leaves a room:
   dotnet run --verbosity normal
   ```
 
-## 10. Next Steps
+## 11. Next Steps
 - Add authentication/tokens for secure player identification
 - Implement chat functionality
 - Add race-specific features like lap counting and race timing

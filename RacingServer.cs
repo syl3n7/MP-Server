@@ -449,4 +449,26 @@ public sealed class RacingServer : IHostedService, IDisposable
     {
         return _sessions.Values.ToList().AsReadOnly();
     }
+
+    public async Task BroadcastToRoomAsync<T>(string roomId, T message, CancellationToken ct = default)
+    {
+        if (_rooms.TryGetValue(roomId, out GameRoom? room) && room != null)
+        {
+            foreach (var player in room.Players)
+            {
+                if (_sessions.TryGetValue(player.Id, out PlayerSession? session) && session != null)
+                {
+                    try
+                    {
+                        await session.SendJsonAsync(message, ct);
+                        _logger.LogDebug("📤 Broadcast message to player {PlayerId} in room {RoomId}", player.Id, roomId);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "❌ Error broadcasting message to player {PlayerId}", player.Id);
+                    }
+                }
+            }
+        }
+    }
 }

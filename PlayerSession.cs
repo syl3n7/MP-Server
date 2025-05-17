@@ -268,6 +268,12 @@ public sealed class PlayerSession : IDisposable
                     
                     gameRoom.StartGame();
                     _server.Logger.LogInformation("🎮 Game started in room {RoomId} by host {HostId}", CurrentRoomId, Id);
+                    
+                    // Broadcast game start to all players in the room
+                    var gameStartedMessage = new { command = "GAME_STARTED", roomId = CurrentRoomId, hostId = Id };
+                    await _server.BroadcastToRoomAsync(CurrentRoomId, gameStartedMessage, ct);
+                    
+                    // Still send a direct response to the host
                     await SendJsonAsync(new { command = "GAME_STARTED", roomId = CurrentRoomId }, ct);
                     break;
                     
