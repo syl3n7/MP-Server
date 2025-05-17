@@ -160,15 +160,73 @@ public sealed class PlayerSession : IDisposable
                     break;
 
                 case "START_GAME":
-                    if (CurrentRoomId != null && _server.GetActiveRooms().FirstOrDefault(r => r.Id == CurrentRoomId) is GameRoom activeRoom)
+                    if (string.IsNullOrEmpty(CurrentRoomId))
                     {
-                        activeRoom.StartGame();
-                        await SendJsonAsync(new { command = "GAME_STARTED", roomId = activeRoom.Id }, ct);
+                        await SendJsonAsync(new { command = "ERROR", message = "Cannot start game. No room joined." }, ct);
+                        break;
                     }
-                    else
+                    
+                    var gameRoom = _server.GetAllRooms().FirstOrDefault(r => r.Id == CurrentRoomId);
+                    if (gameRoom == null)
                     {
-                        await SendJsonAsync(new { command = "ERROR", message = "Cannot start game. No room joined or room not found." }, ct);
+                        await SendJsonAsync(new { command = "ERROR", message = "Cannot start game. Room not found." }, ct);
+                        break;
                     }
+                    
+                    if (!gameRoom.ContainsPlayer(Id))
+                    {
+                        await SendJsonAsync(new { command = "ERROR", message = "Cannot start game. You are not in this room." }, ct);
+                        CurrentRoomId = null; // Reset the room ID since it's invalid
+                        break;
+                    }
+                    
+                    if (gameRoom.HostId != Id)
+                    {
+                        await SendJsonAsync(new { command = "ERROR", message = "Cannot start game. Only the host can start the game." }, ct);
+                        break;
+                    }
+                    
+                    gameRoom.StartGame();
+                    _server.Logger.LogInformation("🎮 Game started in room {RoomId} by host {HostId}", CurrentRoomId, Id);
+                    await SendJsonAsync(new { command = "GAME_STARTED", roomId = CurrentRoomId }, ct);
+                    break;
+                    
+                case "LEAVE_ROOM":
+                    if (string.IsNullOrEmpty(CurrentRoomId))
+                    {
+                        await SendJsonAsync(new { command = "ERROR", message = "Cannot leave room. No room joined." }, ct);
+                        break;
+                    }
+                    
+                    var room = _server.GetAllRooms().FirstOrDefault(r => r.Id == CurrentRoomId);
+                    if (room == null)
+                    {
+                        await SendJsonAsync(new { command = "ERROR", message = "Cannot leave room. Room not found." }, ct);
+                        CurrentRoomId = null; // Reset the room ID since it's invalid
+                        break;
+                    }
+                    
+                    if (!room.ContainsPlayer(Id))
+                    {
+                        await SendJsonAsync(new { command = "ERROR", message = "Cannot leave room. You are not in this room." }, ct);
+                        CurrentRoomId = null; // Reset the room ID since it's invalid
+                        break;
+                    }
+                    
+                    // If this player is the host and there are other players, we could transfer host status
+                    // But for simplicity, we'll just remove the player and let the room continue if it's active
+                    bool wasHost = room.HostId == Id;
+                    string roomName = room.Name;
+                    
+                    // Remove player from room
+                    room.TryRemovePlayer(Id);
+                    string previousRoomId = CurrentRoomId;
+                    CurrentRoomId = null;
+                    
+                    _server.Logger.LogInformation("👤 Player {SessionId} ({Name}) left room '{RoomName}' ({RoomId})", 
+                        Id, PlayerName, roomName, previousRoomId);
+                    
+                    await SendJsonAsync(new { command = "LEAVE_OK", roomId = previousRoomId }, ct);
                     break;
 
                 case "BYE":
