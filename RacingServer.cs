@@ -196,40 +196,60 @@ public sealed class RacingServer : IHostedService, IDisposable
             JsonElement root = document.RootElement;
             
             // Check if this is an UPDATE command
-            if (root.TryGetProperty("command", out JsonElement commandElement) && 
-                commandElement.GetString() == "UPDATE" &&
-                root.TryGetProperty("sessionId", out JsonElement sessionIdElement))
+            if (root.TryGetProperty("command", out JsonElement commandElement))
             {
-                string? sessionId = sessionIdElement.GetString();
+                string? commandType = commandElement.GetString();
                 
-                if (string.IsNullOrEmpty(sessionId))
+                if (commandType == "UPDATE" && root.TryGetProperty("sessionId", out JsonElement sessionIdElement))
                 {
-                    _logger.LogWarning("⚠️ Received UDP update with empty sessionId");
-                    return;
-                }
-                
-                // Update player UDP endpoint if it's our first packet from this player
-                if (_sessions.TryGetValue(sessionId, out PlayerSession? session) && session != null && session.CurrentRoomId != null)
-                {
-                    // Create player info with UDP endpoint
-                    var playerInfo = new PlayerInfo(
-                        session.Id,
-                        session.PlayerName,
-                        remoteEndPoint as IPEndPoint,
-                        ParseVector3(root, "position"),
-                        ParseQuaternion(root, "rotation")
-                    );
+                    string? sessionId = sessionIdElement.GetString();
                     
-                    // Find the room and update player info
-                    if (_rooms.TryGetValue(session.CurrentRoomId, out GameRoom? room) && room != null)
+                    if (string.IsNullOrEmpty(sessionId))
                     {
-                        // Update player in room with new position info
-                        room.TryRemovePlayer(sessionId);
-                        room.TryAddPlayer(playerInfo);
-                        
-                        // Broadcast to all other players in the same room
-                        await BroadcastPositionUpdateAsync(playerInfo, session.CurrentRoomId, sessionId);
+                        _logger.LogWarning("⚠️ Received UDP update with empty sessionId");
+                        return;
                     }
+                    
+                    // Update player UDP endpoint if it's our first packet from this player
+                    if (_sessions.TryGetValue(sessionId, out PlayerSession? session) && session != null && session.CurrentRoomId != null)
+                    {
+                        // Create player info with UDP endpoint
+                        var playerInfo = new PlayerInfo(
+                            session.Id,
+                            session.PlayerName,
+                            remoteEndPoint as IPEndPoint,
+                            ParseVector3(root, "position"),
+                            ParseQuaternion(root, "rotation")
+                        );
+                        
+                        // Find the room and update player info
+                        if (_rooms.TryGetValue(session.CurrentRoomId, out GameRoom? room) && room != null)
+                        {
+                            // Update player in room with new position info
+                            room.TryRemovePlayer(sessionId);
+                            room.TryAddPlayer(playerInfo);
+                            
+                            // Broadcast to all other players in the same room
+                            await BroadcastPositionUpdateAsync(playerInfo, session.CurrentRoomId, sessionId);
+                        }
+                    }
+                }
+                else if (commandType == "INPUT" && root.TryGetProperty("sessionId", out JsonElement inputSessionIdElement))
+                {
+                    // Process INPUT command (will be implemented)
+                    string? sessionId = inputSessionIdElement.GetString();
+                    if (!string.IsNullOrEmpty(sessionId) && root.TryGetProperty("roomId", out JsonElement roomIdElement))
+                    {
+                        string? roomId = roomIdElement.GetString();
+                        if (!string.IsNullOrEmpty(roomId) && _rooms.TryGetValue(roomId, out GameRoom? room) && room != null)
+                        {
+                            await ProcessInputCommandAsync(root, sessionId, roomId);
+                        }
+                    }
+                }
+                else
+                {
+                    _logger.LogWarning("⚠️ Received malformed UDP packet: {Message}", message);
                 }
             }
             else
@@ -244,6 +264,42 @@ public sealed class RacingServer : IHostedService, IDisposable
         catch (Exception ex)
         {
             _logger.LogError(ex, "❌ Error processing UDP packet from {RemoteEndPoint}", remoteEndPoint);
+        }
+    }
+
+    // Add new method to process INPUT commands
+    private async Task ProcessInputCommandAsync(JsonElement root, string sessionId, string roomId)
+    {
+        if (!root.TryGetProperty("input", out JsonElement inputElement))
+            return;
+
+        // Broadcast input to all other players in the room
+        if (_rooms.TryGetValue(roomId, out GameRoom? room) && room != null)
+        {
+            foreach (var player in room.Players)
+            {
+                // Don't send the input back to the sender
+                if (player.Id == sessionId) continue;
+                
+                // Skip players without a UDP endpoint
+                if (player.UdpEndpoint == null) continue;
+                
+                try
+                {
+                    // Create the input message - forward exactly what we received
+                    var inputMsg = JsonSerializer.Serialize(root) + "\n";
+                    byte[] bytes = Encoding.UTF8.GetBytes(inputMsg);
+                    
+                    // Send the input to the player
+                    await _udpListener!.SendToAsync(bytes, player.UdpEndpoint);
+                    
+                    _logger.LogDebug("📤 Broadcast input from {SenderId} to {ReceiverId}", sessionId, player.Id);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "❌ Error broadcasting input update to {PlayerId}", player.Id);
+                }
+            }
         }
     }
 

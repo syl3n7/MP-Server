@@ -39,6 +39,8 @@ Ports (defaults):
 | `LEAVE_ROOM`   | Client → Srv | `{"command":"LEAVE_ROOM"}`                      | `{"command":"LEAVE_OK","roomId":"id"}` or `{"command":"ERROR","message":"Cannot leave room. No room joined."}` |
 | `PING`         | Client → Srv | `{"command":"PING"}`                            | `{"command":"PONG"}`                  |
 | `LIST_ROOMS`   | Client → Srv | `{"command":"LIST_ROOMS"}`                     | `{"command":"ROOM_LIST","rooms":[{"id":"id","name":"roomName","playerCount":0,"isActive":false}]}` |
+| `GET_ROOM_PLAYERS` | Client → Srv | `{"command":"GET_ROOM_PLAYERS"}`          | `{"command":"ROOM_PLAYERS","roomId":"id","players":[{"id":"playerId","name":"playerName"}]}` or `{"command":"ERROR","message":"Cannot get players. No room joined."}` |
+| `RELAY_MESSAGE` | Client → Srv | `{"command":"RELAY_MESSAGE","targetId":"playerId","message":"text"}` | `{"command":"RELAY_OK","targetId":"playerId"}` or `{"command":"ERROR","message":"Target player not found."}` |
 | `PLAYER_INFO`  | Client → Srv | `{"command":"PLAYER_INFO"}`                    | `{"command":"PLAYER_INFO","playerInfo":{"id":"id","name":"playerName","currentRoomId":"roomId"}}` |
 | `START_GAME`   | Client → Srv | `{"command":"START_GAME"}`                     | `{"command":"GAME_STARTED","roomId":"roomId"}` or `{"command":"ERROR","message":"Cannot start game. No room joined or room not found."}` |
 | `BYE`          | Client → Srv | `{"command":"BYE"}`                            | `{"command":"BYE_OK"}` |
@@ -55,13 +57,19 @@ Ports (defaults):
 Use UDP for low‐latency position & rotation updates once the client has joined or created a room.
 
 ### 4.2 Packet Format (JSON-based)
-The server accepts and broadcasts JSON packets for position updates:
+The server accepts and broadcasts JSON packets for position updates and input controls:
 
+#### Position Updates
 ```
 {"command":"UPDATE","sessionId":"id","position":{"x":0,"y":0,"z":0},"rotation":{"x":0,"y":0,"z":0,"w":1}}\n
 ```
 
-#### Required Fields:
+#### Input Controls
+```
+{"command":"INPUT","sessionId":"id","roomId":"roomId","input":{"steering":0.0,"throttle":0.0,"brake":0.0,"timestamp":123.456},"client_id":"id"}\n
+```
+
+#### Required Fields for Position Updates:
 - `command`: Must be "UPDATE"
 - `sessionId`: Your TCP session ID (received during connection)
 - `position`: A Vector3 object with:
@@ -73,6 +81,17 @@ The server accepts and broadcasts JSON packets for position updates:
   - `y`: Y component (float)
   - `z`: Z component (float)
   - `w`: W component (float, default 1.0)
+
+#### Required Fields for Input Controls:
+- `command`: Must be "INPUT"
+- `sessionId`: Your TCP session ID (received during connection)
+- `roomId`: The ID of the room you're currently in
+- `input`: An object containing control values:
+  - `steering`: Steering input (-1.0 to 1.0, where -1 is full left, 1 is full right)
+  - `throttle`: Acceleration input (0.0 to 1.0)
+  - `brake`: Brake input (0.0 to 1.0)
+  - `timestamp`: Game time in seconds when this input was recorded
+- `client_id`: Your client ID (should match sessionId)
 
 Server echoes these updates to all other clients in the same room (excluding the sender).
 

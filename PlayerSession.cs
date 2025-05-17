@@ -108,6 +108,74 @@ public sealed class PlayerSession : IDisposable
                     }
                     break;
                     
+                case "GET_ROOM_PLAYERS":
+                    if (string.IsNullOrEmpty(CurrentRoomId))
+                    {
+                        await SendJsonAsync(new { command = "ERROR", message = "Cannot get players. No room joined." }, ct);
+                        break;
+                    }
+                    
+                    var currentRoom = _server.GetAllRooms().FirstOrDefault(r => r.Id == CurrentRoomId);
+                    if (currentRoom == null)
+                    {
+                        await SendJsonAsync(new { command = "ERROR", message = "Cannot get players. Room not found." }, ct);
+                        break;
+                    }
+
+                    var playerList = currentRoom.Players.Select(p => new { 
+                        id = p.Id, 
+                        name = p.Name
+                    }).ToList();
+
+                    await SendJsonAsync(new { 
+                        command = "ROOM_PLAYERS", 
+                        roomId = CurrentRoomId,
+                        players = playerList
+                    }, ct);
+                    break;
+                    
+                case "RELAY_MESSAGE":
+                    if (jsonMessage.TryGetProperty("message", out var messageElement) &&
+                        jsonMessage.TryGetProperty("targetId", out var targetElement))
+                    {
+                        var messageContent = messageElement.GetString();
+                        var targetId = targetElement.GetString();
+                        
+                        if (string.IsNullOrEmpty(targetId) || string.IsNullOrEmpty(messageContent))
+                        {
+                            await SendJsonAsync(new { command = "ERROR", message = "Invalid message relay request. Missing target or message." }, ct);
+                            break;
+                        }
+
+                        var targetPlayer = _server.GetPlayerSession(targetId);
+                        if (targetPlayer == null)
+                        {
+                            await SendJsonAsync(new { command = "ERROR", message = "Target player not found." }, ct);
+                            break;
+                        }
+
+                        // Create the relay message
+                        var relayData = new { 
+                            command = "RELAYED_MESSAGE", 
+                            senderId = Id,
+                            senderName = PlayerName,
+                            message = messageContent
+                        };
+
+                        // Send to target player
+                        await targetPlayer.SendJsonAsync(relayData, ct);
+                        
+                        // Acknowledge to the sender
+                        await SendJsonAsync(new { command = "RELAY_OK", targetId }, ct);
+
+                        _server.Logger.LogInformation("✉️ Message relayed from {SenderId} to {TargetId}", Id, targetId);
+                    }
+                    else
+                    {
+                        await SendJsonAsync(new { command = "ERROR", message = "Invalid message relay request." }, ct);
+                    }
+                    break;
+
                 case "JOIN_ROOM":
                     if (jsonMessage.TryGetProperty("roomId", out var roomIdElement))
                     {
