@@ -42,14 +42,32 @@ Ports (defaults):
 | `GET_ROOM_PLAYERS` | Client → Srv | `{"command":"GET_ROOM_PLAYERS"}`          | `{"command":"ROOM_PLAYERS","roomId":"id","players":[{"id":"playerId","name":"playerName"}]}` or `{"command":"ERROR","message":"Cannot get players. No room joined."}` |
 | `RELAY_MESSAGE` | Client → Srv | `{"command":"RELAY_MESSAGE","targetId":"playerId","message":"text"}` | `{"command":"RELAY_OK","targetId":"playerId"}` or `{"command":"ERROR","message":"Target player not found."}` |
 | `PLAYER_INFO`  | Client → Srv | `{"command":"PLAYER_INFO"}`                    | `{"command":"PLAYER_INFO","playerInfo":{"id":"id","name":"playerName","currentRoomId":"roomId"}}` |
-| `START_GAME`   | Client → Srv | `{"command":"START_GAME"}`                     | `{"command":"GAME_STARTED","roomId":"roomId"}` or `{"command":"ERROR","message":"Cannot start game. No room joined or room not found."}` |
+| `START_GAME`   | Client → Srv | `{"command":"START_GAME"}`                     | `{"command":"GAME_STARTED","roomId":"roomId"}` or `{"command":"ERROR","message":"Cannot start game. Only the host can start the game."}` |
 | `BYE`          | Client → Srv | `{"command":"BYE"}`                            | `{"command":"BYE_OK"}` |
 | Any other      | Client → Srv | e.g. `{"command":"FOO"}`                        | `{"command":"UNKNOWN_COMMAND","originalCommand":"FOO"}` |
+
+#### Server-to-Client Messages
+The server may also send these messages without a direct client request:
+
+| Message | Purpose | Format |
+| ------- | ------- | ------ |
+| `RELAYED_MESSAGE` | Message relayed from another player | `{"command":"RELAYED_MESSAGE","senderId":"id","senderName":"name","message":"text"}` |
 
 #### Error Handling
 - Malformed JSON commands return `{"command":"ERROR","message":"Invalid JSON format"}`.
 - Unrecognized commands return `{"command":"UNKNOWN_COMMAND","originalCommand":"cmd"}`.
 - If server detects inactivity (>60 s without messages), it will close the TCP socket.
+- Common error messages include:
+  - `"Room not found."`
+  - `"Cannot start game. No room joined."`
+  - `"Cannot start game. Room not found."`
+  - `"Cannot start game. You are not in this room."`
+  - `"Cannot start game. Only the host can start the game."`
+  - `"Cannot leave room. No room joined."`
+  - `"Cannot leave room. Room not found."`
+  - `"Cannot leave room. You are not in this room."`
+  - `"Invalid message relay request. Missing target or message."`
+  - `"Target player not found."`
 
 ## 4. UDP Protocol
 
@@ -60,12 +78,12 @@ Use UDP for low‐latency position & rotation updates once the client has joined
 The server accepts and broadcasts JSON packets for position updates and input controls:
 
 #### Position Updates
-```
+```json
 {"command":"UPDATE","sessionId":"id","position":{"x":0,"y":0,"z":0},"rotation":{"x":0,"y":0,"z":0,"w":1}}\n
 ```
 
 #### Input Controls
-```
+```json
 {"command":"INPUT","sessionId":"id","roomId":"roomId","input":{"steering":0.0,"throttle":0.0,"brake":0.0,"timestamp":123.456},"client_id":"id"}\n
 ```
 
@@ -101,6 +119,7 @@ Server echoes these updates to all other clients in the same room (excluding the
 - The server records the UDP endpoint (IP:port) with the player's session
 - Players without a registered UDP endpoint won't receive position broadcasts
 - The server automatically handles mapping between player sessions and UDP endpoints
+- Input commands are broadcast to all clients in the room except the sender, with the exact format preserved
 
 ### 4.4 Example (C# send)
 ```csharp
@@ -127,22 +146,45 @@ while (true)
     var json = Encoding.UTF8.GetString(result.Buffer);
     var update = JsonSerializer.Deserialize<JsonElement>(json);
     
-    // Extract values
-    var sessionId = update.GetProperty("sessionId").GetString();
-    var position = update.GetProperty("position");
-    var rotation = update.GetProperty("rotation");
-    
-    float posX = position.GetProperty("x").GetSingle();
-    float posY = position.GetProperty("y").GetSingle();
-    float posZ = position.GetProperty("z").GetSingle();
-    
-    float rotX = rotation.GetProperty("x").GetSingle();
-    float rotY = rotation.GetProperty("y").GetSingle();
-    float rotZ = rotation.GetProperty("z").GetSingle();
-    float rotW = rotation.GetProperty("w").GetSingle();
-    
-    // Use position and rotation to update game state
-    // ...
+    // Process by command type
+    if (update.TryGetProperty("command", out var cmdElement))
+    {
+        string command = cmdElement.GetString();
+        
+        if (command == "UPDATE")
+        {
+            // Process position update
+            var sessionId = update.GetProperty("sessionId").GetString();
+            var position = update.GetProperty("position");
+            var rotation = update.GetProperty("rotation");
+            
+            float posX = position.GetProperty("x").GetSingle();
+            float posY = position.GetProperty("y").GetSingle();
+            float posZ = position.GetProperty("z").GetSingle();
+            
+            float rotX = rotation.GetProperty("x").GetSingle();
+            float rotY = rotation.GetProperty("y").GetSingle();
+            float rotZ = rotation.GetProperty("z").GetSingle();
+            float rotW = rotation.GetProperty("w").GetSingle();
+            
+            // Use position and rotation to update game state
+            // ...
+        }
+        else if (command == "INPUT")
+        {
+            // Process input update
+            var sessionId = update.GetProperty("sessionId").GetString();
+            var input = update.GetProperty("input");
+            
+            float steering = input.GetProperty("steering").GetSingle();
+            float throttle = input.GetProperty("throttle").GetSingle();
+            float brake = input.GetProperty("brake").GetSingle();
+            float timestamp = input.GetProperty("timestamp").GetSingle();
+            
+            // Apply input to the relevant player's vehicle
+            // ...
+        }
+    }
 }
 ```
 
@@ -153,12 +195,16 @@ while (true)
 - Rooms have a maximum player limit (default: 20)
 - Rooms can be active (game started) or inactive (lobby)
 - Creation timestamp is recorded
+- When the host leaves a room:
+  - If the room is empty, it is automatically removed
+  - If other players are present, host status is transferred to another player
 
 ### 5.2 Room Operations
 - Create room: A player can create a new room and becomes its host
 - Join room: Players can join rooms that are not active and not full
-- Start game: The host can start the game, which marks the room as active
+- Start game: Only the host can start the game, which marks the room as active
 - List rooms: Get all available rooms with their basic information
+- Get room players: Get the list of players in the current room
 
 ## 6. Example TCP Client (C#)
 
@@ -222,7 +268,19 @@ class RacingClient
 - Position is represented as Vector3 (x, y, z)
 - Rotation is represented as Quaternion (x, y, z, w)
 
-## 8. Logging & Debug
+### 7.3 Message Relay
+- Players can relay messages to other players using their session ID
+- Messages are delivered to the target player via TCP
+- The receiving player gets a `RELAYED_MESSAGE` command with the sender's ID, name, and message
+
+## 8. Host Transfer Mechanism
+When a host player leaves a room:
+- If the room is empty, it is automatically removed
+- If other players remain in the room, host status transfers to another player
+- The new host has the authority to start the game
+- No specific notification is sent when host status changes (clients should track this if needed)
+
+## 9. Logging & Debug
 - TCP events (connect, disconnect, commands) are logged at INFO level
 - UDP packet receipt and processing are logged at DEBUG level
 - JSON parsing errors are caught and logged
@@ -231,7 +289,7 @@ class RacingClient
   dotnet run --verbosity normal
   ```
 
-## 9. Next Steps
+## 10. Next Steps
 - Add authentication/tokens for secure player identification
 - Implement chat functionality
 - Add race-specific features like lap counting and race timing
