@@ -10,6 +10,7 @@ using System.Threading.Tasks;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using System.Numerics;
+using MP.Server;
 
 public sealed class RacingServer : IHostedService, IDisposable
 {
