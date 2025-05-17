@@ -7,6 +7,7 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
+using System.Numerics;
 
 public sealed class PlayerSession : IDisposable
 {
@@ -111,10 +112,24 @@ public sealed class PlayerSession : IDisposable
                     if (jsonMessage.TryGetProperty("roomId", out var roomIdElement))
                     {
                         var roomId = roomIdElement.GetString() ?? string.Empty;
-                        _server.Logger.LogInformation("👤 Player {SessionId} ({Name}) attempting to join room {RoomId}", 
-                            Id, PlayerName, roomId);
-                        // TODO: Implement room joining logic
-                        await SendJsonAsync(new { command = "JOIN_OK", roomId }, ct);
+                        if (_server.GetAllRooms().FirstOrDefault(r => r.Id == roomId) is GameRoom room)
+                        {
+                            var newPlayerInfo = new PlayerInfo(Id, PlayerName, null, new Vector3(), new Quaternion());
+                            if (room.TryJoinRoom(Id, newPlayerInfo))
+                            {
+                                CurrentRoomId = roomId;
+                                _server.Logger.LogInformation("👤 Player {SessionId} ({Name}) joined room {RoomId}", Id, PlayerName, roomId);
+                                await SendJsonAsync(new { command = "JOIN_OK", roomId }, ct);
+                            }
+                            else
+                            {
+                                await SendJsonAsync(new { command = "ERROR", message = "Failed to join room. Room may be full or inactive." }, ct);
+                            }
+                        }
+                        else
+                        {
+                            await SendJsonAsync(new { command = "ERROR", message = "Room not found." }, ct);
+                        }
                     }
                     break;
                     
@@ -145,15 +160,21 @@ public sealed class PlayerSession : IDisposable
                     break;
 
                 case "START_GAME":
-                    if (CurrentRoomId != null && _server.GetActiveRooms().FirstOrDefault(r => r.Id == CurrentRoomId) is GameRoom room)
+                    if (CurrentRoomId != null && _server.GetActiveRooms().FirstOrDefault(r => r.Id == CurrentRoomId) is GameRoom activeRoom)
                     {
-                        room.StartGame();
-                        await SendJsonAsync(new { command = "GAME_STARTED", roomId = room.Id }, ct);
+                        activeRoom.StartGame();
+                        await SendJsonAsync(new { command = "GAME_STARTED", roomId = activeRoom.Id }, ct);
                     }
                     else
                     {
                         await SendJsonAsync(new { command = "ERROR", message = "Cannot start game. No room joined or room not found." }, ct);
                     }
+                    break;
+
+                case "BYE":
+                    _server.Logger.LogInformation("👋 Player {SessionId} ({Name}) is disconnecting", Id, PlayerName);
+                    await SendJsonAsync(new { command = "BYE_OK" }, ct);
+                    await DisconnectAsync();
                     break;
                     
                 default:

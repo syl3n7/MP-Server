@@ -40,4 +40,12 @@ public sealed class GameRoom
     {
         IsActive = true;
     }
+
+    public bool TryJoinRoom(string playerId, PlayerInfo player)
+    {
+        if (IsActive || _players.Count >= MaxPlayers || _players.ContainsKey(playerId))
+            return false;
+
+        return _players.TryAdd(playerId, player);
+    }
 }
