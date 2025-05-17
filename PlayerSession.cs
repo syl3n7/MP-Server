@@ -115,7 +115,7 @@ public sealed class PlayerSession : IDisposable
                         if (_server.GetAllRooms().FirstOrDefault(r => r.Id == roomId) is GameRoom targetRoom)
                         {
                             var newPlayerInfo = new PlayerInfo(Id, PlayerName, null, new Vector3(), new Quaternion());
-                            if (targetRoom.TryJoinRoom(Id, newPlayerInfo))
+                            if (targetRoom.TryAddPlayer(newPlayerInfo))
                             {
                                 CurrentRoomId = roomId;
                                 _server.Logger.LogInformation("👤 Player {SessionId} ({Name}) joined room {RoomId}", Id, PlayerName, roomId);
@@ -139,6 +139,11 @@ public sealed class PlayerSession : IDisposable
                         var newRoomName = roomNameElement.GetString() ?? "Race Room";
                         var newRoom = _server.CreateRoom(newRoomName, Id);
                         CurrentRoomId = newRoom.Id;
+                        
+                        // Add the player to the room they created
+                        var playerInfo = new PlayerInfo(Id, PlayerName, null, new Vector3(), new Quaternion());
+                        newRoom.TryAddPlayer(playerInfo);
+                        
                         _server.Logger.LogInformation("👤 Player {SessionId} ({Name}) created room '{RoomName}' ({RoomId})", 
                             Id, PlayerName, newRoomName, newRoom.Id);
                         await SendJsonAsync(new { command = "ROOM_CREATED", roomId = newRoom.Id, name = newRoomName }, ct);
@@ -155,8 +160,8 @@ public sealed class PlayerSession : IDisposable
                     break;
 
                 case "PLAYER_INFO":
-                    var playerInfo = new { Id, PlayerName, CurrentRoomId };
-                    await SendJsonAsync(new { command = "PLAYER_INFO", playerInfo }, ct);
+                    var playerDetails = new { Id, PlayerName, CurrentRoomId };
+                    await SendJsonAsync(new { command = "PLAYER_INFO", playerInfo = playerDetails }, ct);
                     break;
 
                 case "START_GAME":

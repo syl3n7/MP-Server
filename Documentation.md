@@ -61,17 +61,27 @@ The server accepts and broadcasts JSON packets for position updates:
 {"command":"UPDATE","sessionId":"id","position":{"x":0,"y":0,"z":0},"rotation":{"x":0,"y":0,"z":0,"w":1}}\n
 ```
 
-- `sessionId`: your TCP session ID  
-- `position`: Vector3 with x, y, z coordinates
-- `rotation`: Quaternion with x, y, z, w components
+#### Required Fields:
+- `command`: Must be "UPDATE"
+- `sessionId`: Your TCP session ID (received during connection)
+- `position`: A Vector3 object with:
+  - `x`: X coordinate (float)
+  - `y`: Y coordinate (float)
+  - `z`: Z coordinate (float)
+- `rotation`: A Quaternion object with:
+  - `x`: X component (float)
+  - `y`: Y component (float)
+  - `z`: Z component (float)
+  - `w`: W component (float, default 1.0)
 
-Server echoes or broadcasts state to other clients in the same room.
+Server echoes these updates to all other clients in the same room (excluding the sender).
 
-### 4.3 UDP Broadcasting
-- Position updates are automatically broadcast to all players in the same room (except the sender)
-- The server maintains player positions with their UDP endpoints in each room
-- Each player needs to send at least one UDP packet to register their endpoint with the server
-- Server manages the mapping between player sessions and their UDP endpoints
+### 4.3 UDP Broadcasting Behavior
+- Position updates are sent only to players in the same room
+- Each player must send at least one UDP packet to register their endpoint with the server
+- The server records the UDP endpoint (IP:port) with the player's session
+- Players without a registered UDP endpoint won't receive position broadcasts
+- The server automatically handles mapping between player sessions and UDP endpoints
 
 ### 4.4 Example (C# send)
 ```csharp
@@ -85,6 +95,36 @@ var posUpdate = new {
 var json = JsonSerializer.Serialize(posUpdate) + "\n";
 var bytes = Encoding.UTF8.GetBytes(json);
 await udp.SendAsync(bytes, bytes.Length, serverHost, 7778);
+```
+
+### 4.5 Example (C# receive)
+```csharp
+using var udpClient = new UdpClient(localPort); // Local port to listen on
+var endpoint = new IPEndPoint(IPAddress.Any, 0);
+
+while (true)
+{
+    var result = await udpClient.ReceiveAsync();
+    var json = Encoding.UTF8.GetString(result.Buffer);
+    var update = JsonSerializer.Deserialize<JsonElement>(json);
+    
+    // Extract values
+    var sessionId = update.GetProperty("sessionId").GetString();
+    var position = update.GetProperty("position");
+    var rotation = update.GetProperty("rotation");
+    
+    float posX = position.GetProperty("x").GetSingle();
+    float posY = position.GetProperty("y").GetSingle();
+    float posZ = position.GetProperty("z").GetSingle();
+    
+    float rotX = rotation.GetProperty("x").GetSingle();
+    float rotY = rotation.GetProperty("y").GetSingle();
+    float rotZ = rotation.GetProperty("z").GetSingle();
+    float rotW = rotation.GetProperty("w").GetSingle();
+    
+    // Use position and rotation to update game state
+    // ...
+}
 ```
 
 ## 5. Room Management

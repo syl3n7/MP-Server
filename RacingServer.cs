@@ -209,7 +209,7 @@ public sealed class RacingServer : IHostedService, IDisposable
                 }
                 
                 // Update player UDP endpoint if it's our first packet from this player
-                if (_sessions.TryGetValue(sessionId, out PlayerSession? session) && session?.CurrentRoomId != null)
+                if (_sessions.TryGetValue(sessionId, out PlayerSession? session) && session != null && session.CurrentRoomId != null)
                 {
                     // Create player info with UDP endpoint
                     var playerInfo = new PlayerInfo(
