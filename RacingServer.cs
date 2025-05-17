@@ -3,10 +3,13 @@ using System.Buffers;
 using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Sockets;
+using System.Text;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using System.Numerics;
 
 public sealed class RacingServer : IHostedService, IDisposable
 {
@@ -179,13 +182,124 @@ public sealed class RacingServer : IHostedService, IDisposable
     {
         try
         {
-            // TODO: Parse and route UDP messages
-            _logger.LogDebug("🔍 Processing UDP packet from {RemoteEndPoint}", remoteEndPoint);
-            await Task.CompletedTask; // Add await to make this truly async
+            string message = Encoding.UTF8.GetString(data.Span).TrimEnd('\n');
+            _logger.LogDebug("🔍 Processing UDP packet from {RemoteEndPoint}: {Message}", remoteEndPoint, message);
+            
+            // Parse the JSON message
+            using JsonDocument document = JsonDocument.Parse(message);
+            JsonElement root = document.RootElement;
+            
+            // Check if this is an UPDATE command
+            if (root.TryGetProperty("command", out JsonElement commandElement) && 
+                commandElement.GetString() == "UPDATE" &&
+                root.TryGetProperty("sessionId", out JsonElement sessionIdElement))
+            {
+                string sessionId = sessionIdElement.GetString();
+                
+                // Update player UDP endpoint if it's our first packet from this player
+                if (_sessions.TryGetValue(sessionId, out PlayerSession session) && session.CurrentRoomId != null)
+                {
+                    // Create player info with UDP endpoint
+                    var playerInfo = new PlayerInfo(
+                        session.Id,
+                        session.PlayerName,
+                        remoteEndPoint as IPEndPoint,
+                        ParseVector3(root, "position"),
+                        ParseQuaternion(root, "rotation")
+                    );
+                    
+                    // Find the room and update player info
+                    if (_rooms.TryGetValue(session.CurrentRoomId, out GameRoom room))
+                    {
+                        // Update player in room with new position info
+                        room.TryRemovePlayer(sessionId);
+                        room.TryAddPlayer(playerInfo);
+                        
+                        // Broadcast to all other players in the same room
+                        BroadcastPositionUpdate(playerInfo, session.CurrentRoomId, sessionId);
+                    }
+                }
+            }
+            else
+            {
+                _logger.LogWarning("⚠️ Received malformed UDP packet: {Message}", message);
+            }
+        }
+        catch (JsonException ex)
+        {
+            _logger.LogError(ex, "❌ Error parsing UDP JSON message from {RemoteEndPoint}", remoteEndPoint);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "❌ Error processing UDP packet from {RemoteEndPoint}", remoteEndPoint);
+        }
+    }
+
+    private Vector3 ParseVector3(JsonElement root, string propertyName)
+    {
+        if (root.TryGetProperty(propertyName, out JsonElement vectorElement))
+        {
+            float x = vectorElement.TryGetProperty("x", out JsonElement xElement) ? xElement.GetSingle() : 0f;
+            float y = vectorElement.TryGetProperty("y", out JsonElement yElement) ? yElement.GetSingle() : 0f;
+            float z = vectorElement.TryGetProperty("z", out JsonElement zElement) ? zElement.GetSingle() : 0f;
+            
+            return new Vector3(x, y, z);
+        }
+        
+        return Vector3.Zero;
+    }
+
+    private Quaternion ParseQuaternion(JsonElement root, string propertyName)
+    {
+        if (root.TryGetProperty(propertyName, out JsonElement quatElement))
+        {
+            float x = quatElement.TryGetProperty("x", out JsonElement xElement) ? xElement.GetSingle() : 0f;
+            float y = quatElement.TryGetProperty("y", out JsonElement yElement) ? yElement.GetSingle() : 0f;
+            float z = quatElement.TryGetProperty("z", out JsonElement zElement) ? zElement.GetSingle() : 0f;
+            float w = quatElement.TryGetProperty("w", out JsonElement wElement) ? wElement.GetSingle() : 1f;
+            
+            return new Quaternion(x, y, z, w);
+        }
+        
+        return Quaternion.Identity;
+    }
+
+    private void BroadcastPositionUpdate(PlayerInfo playerInfo, string roomId, string senderId)
+    {
+        if (_rooms.TryGetValue(roomId, out GameRoom room))
+        {
+            foreach (var player in room.Players)
+            {
+                // Don't send the update back to the sender
+                if (player.Id == senderId) continue;
+                
+                // Skip players without a UDP endpoint
+                if (player.UdpEndpoint == null) continue;
+                
+                try
+                {
+                    // Create the update message
+                    var updateMsg = new 
+                    {
+                        command = "UPDATE",
+                        sessionId = playerInfo.Id,
+                        position = new { x = playerInfo.Position.X, y = playerInfo.Position.Y, z = playerInfo.Position.Z },
+                        rotation = new { x = playerInfo.Rotation.X, y = playerInfo.Rotation.Y, z = playerInfo.Rotation.Z, w = playerInfo.Rotation.W }
+                    };
+                    
+                    string json = JsonSerializer.Serialize(updateMsg) + "\n";
+                    byte[] bytes = Encoding.UTF8.GetBytes(json);
+                    
+                    // Send the update to the player
+                    _udpListener.SendToAsync(bytes, player.UdpEndpoint);
+                    
+                    _logger.LogDebug("📤 Broadcast position update from {SenderId} to {ReceiverId}", senderId, player.Id);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "❌ Error broadcasting position update to {PlayerId}", player.Id);
+                }
+            }
         }
     }
 
