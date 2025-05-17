@@ -72,22 +72,45 @@ The server may also send these messages without a direct client request:
 ## 4. UDP Protocol
 
 ### 4.1 Purpose
-Use UDP for low‐latency position & rotation updates once the client has joined or created a room.
+The UDP protocol provides low-latency communication for:
+- Position and rotation updates
+- Input control commands (steering, throttle, brake)
+- Game state synchronization between clients
+
+All UDP communication happens after the client has joined or created a room via TCP.
 
 ### 4.2 Packet Format (JSON-based)
-The server accepts and broadcasts JSON packets for position updates and input controls:
+The server supports two primary types of UDP packets, both based on JSON:
 
 #### Position Updates
 ```json
-{"command":"UPDATE","sessionId":"id","position":{"x":0,"y":0,"z":0},"rotation":{"x":0,"y":0,"z":0,"w":1}}\n
+{
+  "command": "UPDATE",
+  "sessionId": "id",
+  "position": {"x": 0.0, "y": 0.0, "z": 0.0},
+  "rotation": {"x": 0.0, "y": 0.0, "z": 0.0, "w": 1.0}
+}
 ```
 
 #### Input Controls
 ```json
-{"command":"INPUT","sessionId":"id","roomId":"roomId","input":{"steering":0.0,"throttle":0.0,"brake":0.0,"timestamp":123.456},"client_id":"id"}\n
+{
+  "command": "INPUT",
+  "sessionId": "id",
+  "roomId": "roomId",
+  "input": {
+    "steering": 0.0,
+    "throttle": 0.0,
+    "brake": 0.0,
+    "timestamp": 123.456
+  },
+  "client_id": "id"
+}
 ```
 
-#### Required Fields for Position Updates:
+### 4.3 Required Fields
+
+#### For Position Updates:
 - `command`: Must be "UPDATE"
 - `sessionId`: Your TCP session ID (received during connection)
 - `position`: A Vector3 object with:
@@ -100,7 +123,7 @@ The server accepts and broadcasts JSON packets for position updates and input co
   - `z`: Z component (float)
   - `w`: W component (float, default 1.0)
 
-#### Required Fields for Input Controls:
+#### For Input Controls:
 - `command`: Must be "INPUT"
 - `sessionId`: Your TCP session ID (received during connection)
 - `roomId`: The ID of the room you're currently in
@@ -111,17 +134,25 @@ The server accepts and broadcasts JSON packets for position updates and input co
   - `timestamp`: Game time in seconds when this input was recorded
 - `client_id`: Your client ID (should match sessionId)
 
-Server echoes these updates to all other clients in the same room (excluding the sender).
+### 4.4 UDP Communication Flow
 
-### 4.3 UDP Broadcasting Behavior
-- Position updates are sent only to players in the same room
-- Each player must send at least one UDP packet to register their endpoint with the server
-- The server records the UDP endpoint (IP:port) with the player's session
-- Players without a registered UDP endpoint won't receive position broadcasts
-- The server automatically handles mapping between player sessions and UDP endpoints
-- Input commands are broadcast to all clients in the room except the sender, with the exact format preserved
+1. **Endpoint Registration**:
+   - The server automatically associates a client's UDP endpoint (IP:port) with their session ID
+   - This mapping happens when the first UDP packet is received from a client
+   - Each player must send at least one UDP packet to register their endpoint
 
-### 4.4 Example (C# send)
+2. **Broadcasting**:
+   - Position updates are sent only to players in the same room
+   - Input commands are broadcast to all clients in the room except the sender
+   - The exact format of received messages matches what was sent (preserving all fields)
+   - Players without a registered UDP endpoint won't receive any broadcasts
+
+3. **Reliability**:
+   - UDP does not guarantee delivery - clients should implement their own reliability mechanisms
+   - High-frequency updates (like position) should be sent periodically regardless of changes
+   - Input commands should be sent when input values change or at a consistent rate
+
+### 4.5 Example (C# send)
 ```csharp
 using var udp = new UdpClient();
 var posUpdate = new { 
@@ -135,7 +166,7 @@ var bytes = Encoding.UTF8.GetBytes(json);
 await udp.SendAsync(bytes, bytes.Length, serverHost, 7778);
 ```
 
-### 4.5 Example (C# receive)
+### 4.6 Example (C# receive)
 ```csharp
 using var udpClient = new UdpClient(localPort); // Local port to listen on
 var endpoint = new IPEndPoint(IPAddress.Any, 0);
@@ -187,6 +218,13 @@ while (true)
     }
 }
 ```
+
+### 4.7 Best Practices
+- Send position updates at a consistent rate (10-30 Hz recommended)
+- Keep UDP packet size under 1200 bytes to avoid fragmentation
+- Handle networking jitter with client-side interpolation
+- Include timestamps in input commands to help with lag compensation
+- Apply basic smoothing or prediction for missing updates
 
 ## 5. Room Management
 
@@ -295,6 +333,7 @@ When a host player leaves a room:
 - Add race-specific features like lap counting and race timing
 - Add server admin commands for room management
 - Optimize UDP broadcast for large player counts
+- Implement game state synchronization for deterministic physics
 
 ---
 

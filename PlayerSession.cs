@@ -223,8 +223,15 @@ public sealed class PlayerSession : IDisposable
                     break;
 
                 case "LIST_ROOMS":
-                    var rooms = _server.GetAllRooms().Select(r => new { r.Id, r.Name, r.PlayerCount, r.IsActive });
+                    var rooms = _server.GetAllRooms().Select(r => new { 
+                        id = r.Id, 
+                        name = r.Name, 
+                        playerCount = r.PlayerCount, 
+                        isActive = r.IsActive,
+                        hostId = r.HostId
+                    });
                     await SendJsonAsync(new { command = "ROOM_LIST", rooms }, ct);
+                    _server.Logger.LogDebug("🏠 Sent room list to player {SessionId}, found {RoomCount} rooms", Id, rooms.Count());
                     break;
 
                 case "PLAYER_INFO":
