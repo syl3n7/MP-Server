@@ -61,6 +61,27 @@
             background-color: #6c757d;
             color: white;
         }
+        .admin-section {
+            background-color: #f8f9fa;
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 20px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+        }
+        .admin-title {
+            font-weight: bold;
+            margin-bottom: 15px;
+            color: #dc3545;
+        }
+        .admin-buttons {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-bottom: 10px;
+        }
+        .btn-danger {
+            margin-right: 5px;
+        }
     </style>
 </head>
 <body>
@@ -74,6 +95,32 @@
             </svg>
             Refresh Data
         </button>
+        
+        <div class="admin-section">
+            <h2 class="admin-title">Admin Controls</h2>
+            <div class="admin-buttons">
+                <button id="closeAllRoomsButton" class="btn btn-danger">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-x-circle" viewBox="0 0 16 16">
+                        <path d="M8 15A7 7 0 1 1 8 1a7 7 0 0 1 0 14m0 1A8 8 0 1 0 8 0a8 8 0 0 0 0 16"/>
+                        <path d="M4.646 4.646a.5.5 0 0 1 .708 0L8 7.293l2.646-2.647a.5.5 0 0 1 .708.708L8.707 8l2.647 2.646a.5.5 0 0 1-.708.708L8 8.707l-2.646 2.647a.5.5 0 0 1-.708-.708L7.293 8 4.646 5.354a.5.5 0 0 1 0-.708"/>
+                    </svg>
+                    Close All Rooms
+                </button>
+                <button id="disconnectAllButton" class="btn btn-danger">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-person-x" viewBox="0 0 16 16">
+                        <path d="M11 5a3 3 0 1 1-6 0 3 3 0 0 1 6 0M8 7a2 2 0 1 0 0-4 2 2 0 0 0 0 4m.256 7a4.5 4.5 0 0 1-.229-1.004H3c.001-.246.154-.986.832-1.664C4.484 10.68 5.711 10 8 10c.26 0 .507.009.74.025.226-.341.496-.65.804-.918C9.077 9.038 8.564 9 8 9c-5 0-6 3-6 4s1 1 1 1z"/>
+                        <path d="M12.5 16a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7m-.646-4.854.646.647.646-.647a.5.5 0 0 1 .708.708l-.647.646.647.646a.5.5 0 0 1-.708.708l-.646-.647-.646.647a.5.5 0 0 1-.708-.708l.647-.646-.647-.646a.5.5 0 0 1 .708-.708"/>
+                    </svg>
+                    Disconnect All Players
+                </button>
+            </div>
+            <div id="selectedItemActions" style="display: none;">
+                <h5>Selected Item Actions:</h5>
+                <div class="admin-buttons" id="itemActionButtons">
+                    <!-- Action buttons will be added here dynamically -->
+                </div>
+            </div>
+        </div>
         
         <div class="stats-container" id="statsContainer">
             <!-- Stats cards will be inserted here -->
@@ -92,6 +139,7 @@
                                         <th>Players</th>
                                         <th>Status</th>
                                         <th>Age</th>
+                                        <th>Actions</th>
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -114,6 +162,7 @@
                                         <th>Player</th>
                                         <th>Room</th>
                                         <th>Last Activity</th>
+                                        <th>Actions</th>
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -139,6 +188,25 @@
             // Manual refresh button
             $("#refreshButton").click(function() {
                 loadAllData();
+            });
+
+            // Admin buttons
+            $("#closeAllRoomsButton").click(function() {
+                if (confirm("Are you sure you want to close all rooms?")) {
+                    $.post("/Dashboard/CloseAllRooms", function(data) {
+                        alert(data.message);
+                        loadAllData();
+                    });
+                }
+            });
+            
+            $("#disconnectAllButton").click(function() {
+                if (confirm("Are you sure you want to disconnect all players?")) {
+                    $.post("/Dashboard/DisconnectAllPlayers", function(data) {
+                        alert(data.message);
+                        loadAllData();
+                    });
+                }
             });
             
             function loadAllData() {
@@ -177,7 +245,7 @@
                     tbody.empty();
                     
                     if (data.length === 0) {
-                        tbody.append('<tr><td colspan="4" class="text-center">No rooms available</td></tr>');
+                        tbody.append('<tr><td colspan="5" class="text-center">No rooms available</td></tr>');
                         return;
                     }
                     
@@ -187,12 +255,35 @@
                             ? '<span class="badge active-badge">Active</span>' 
                             : '<span class="badge inactive-badge">Lobby</span>';
                             
-                        tbody.append(`<tr>
+                        tbody.append(`<tr data-id="${room.id}" data-type="room">
                             <td>${escapeHtml(room.name)}</td>
                             <td>${room.playerCount}</td>
                             <td>${statusBadge}</td>
                             <td>${age}</td>
+                            <td>
+                                <button class="btn btn-sm btn-danger closeRoomBtn" data-id="${room.id}">Close</button>
+                            </td>
                         </tr>`);
+                    });
+                    
+                    // Add event handlers for room actions
+                    $(".closeRoomBtn").click(function() {
+                        const roomId = $(this).data("id");
+                        if (confirm("Are you sure you want to close this room?")) {
+                            $.post("/Dashboard/CloseRoom", { roomId: roomId }, function(data) {
+                                alert(data.message);
+                                loadAllData();
+                            });
+                        }
+                    });
+                    
+                    // Add row click handler for room selection
+                    $("#roomsTable tbody tr").click(function() {
+                        $("#roomsTable tbody tr").removeClass("table-primary");
+                        $(this).addClass("table-primary");
+                        
+                        const roomId = $(this).data("id");
+                        showItemActions("room", roomId);
                     });
                 });
             }
@@ -203,7 +294,7 @@
                     tbody.empty();
                     
                     if (data.length === 0) {
-                        tbody.append('<tr><td colspan="3" class="text-center">No active sessions</td></tr>');
+                        tbody.append('<tr><td colspan="4" class="text-center">No active sessions</td></tr>');
                         return;
                     }
                     
@@ -211,13 +302,69 @@
                         let lastActivity = getTimeAgo(new Date(session.lastActivity));
                         let roomDisplay = session.currentRoomId ? session.currentRoomId : 'None';
                         
-                        tbody.append(`<tr>
+                        tbody.append(`<tr data-id="${session.id}" data-type="session">
                             <td>${escapeHtml(session.name)}</td>
                             <td>${escapeHtml(roomDisplay)}</td>
                             <td>${lastActivity}</td>
+                            <td>
+                                <button class="btn btn-sm btn-danger disconnectBtn" data-id="${session.id}">Disconnect</button>
+                            </td>
                         </tr>`);
                     });
+                    
+                    // Add event handlers for session actions
+                    $(".disconnectBtn").click(function() {
+                        const sessionId = $(this).data("id");
+                        if (confirm("Are you sure you want to disconnect this player?")) {
+                            $.post("/Dashboard/DisconnectPlayer", { sessionId: sessionId }, function(data) {
+                                alert(data.message);
+                                loadAllData();
+                            });
+                        }
+                    });
+                    
+                    // Add row click handler for session selection
+                    $("#sessionsTable tbody tr").click(function() {
+                        $("#sessionsTable tbody tr").removeClass("table-primary");
+                        $(this).addClass("table-primary");
+                        
+                        const sessionId = $(this).data("id");
+                        showItemActions("session", sessionId);
+                    });
                 });
+            }
+            
+            function showItemActions(type, id) {
+                $("#selectedItemActions").show();
+                $("#itemActionButtons").empty();
+                
+                if (type === "room") {
+                    $("#itemActionButtons").append(`
+                        <button class="btn btn-warning" id="closeRoomBtn">Close Room</button>
+                    `);
+                    
+                    $("#closeRoomBtn").click(function() {
+                        if (confirm("Are you sure you want to close this room?")) {
+                            $.post("/Dashboard/CloseRoom", { roomId: id }, function(data) {
+                                alert(data.message);
+                                loadAllData();
+                            });
+                        }
+                    });
+                } else if (type === "session") {
+                    $("#itemActionButtons").append(`
+                        <button class="btn btn-warning" id="disconnectPlayerBtn">Disconnect Player</button>
+                    `);
+                    
+                    $("#disconnectPlayerBtn").click(function() {
+                        if (confirm("Are you sure you want to disconnect this player?")) {
+                            $.post("/Dashboard/DisconnectPlayer", { sessionId: id }, function(data) {
+                                alert(data.message);
+                                loadAllData();
+                            });
+                        }
+                    });
+                }
             }
             
             function formatTimeSpan(timeString) {
