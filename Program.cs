@@ -49,7 +49,7 @@ try
     _ = Task.Run(() => consoleUI.RunAsync(appCts.Token));
     
     // Run the web application on port 8080
-    app.Urls.Add("http://localhost:8080");
+    app.Urls.Add("http://0.0.0.0:8080");
     await app.RunAsync(appCts.Token);
 }
 catch (OperationCanceledException)
