@@ -7,6 +7,7 @@ Clients connect over TCP (for commands, room management, chat) and send/receive 
 Ports (defaults):
 - TCP: 7777
 - UDP: 7778
+- Dashboard Web UI: 8080
 
 ## 2. Prerequisites
 - .NET 9.0 runtime
@@ -29,22 +30,46 @@ Ports (defaults):
    {"command":"COMMAND_NAME","param1":"value1","param2":"value2"}\n
    ```
 
-### 3.2 Supported Commands
+### 3.2 Authentication
+The server supports a simple authentication system to protect player identities:
 
-| Command        | Direction    | Payload (JSON)                                    | Response (JSON)                         |
-| -------------- | ------------ | ------------------------------------------------- | --------------------------------------- |
-| `NAME`         | Client → Srv | `{"command":"NAME","name":"playerName"}`        | `{"command":"NAME_OK","name":"playerName"}` |
-| `CREATE_ROOM`  | Client → Srv | `{"command":"CREATE_ROOM","name":"roomName"}`   | `{"command":"ROOM_CREATED","roomId":"id","name":"roomName"}` |
-| `JOIN_ROOM`    | Client → Srv | `{"command":"JOIN_ROOM","roomId":"id"}`         | `{"command":"JOIN_OK","roomId":"id"}` or `{"command":"ERROR","message":"Failed to join room. Room may be full or inactive."}` |
-| `LEAVE_ROOM`   | Client → Srv | `{"command":"LEAVE_ROOM"}`                      | `{"command":"LEAVE_OK","roomId":"id"}` or `{"command":"ERROR","message":"Cannot leave room. No room joined."}` |
-| `PING`         | Client → Srv | `{"command":"PING"}`                            | `{"command":"PONG"}`                  |
-| `LIST_ROOMS`   | Client → Srv | `{"command":"LIST_ROOMS"}`                     | `{"command":"ROOM_LIST","rooms":[{"id":"id","name":"roomName","playerCount":0,"isActive":false,"hostId":"hostId"}]}` |
-| `GET_ROOM_PLAYERS` | Client → Srv | `{"command":"GET_ROOM_PLAYERS"}`          | `{"command":"ROOM_PLAYERS","roomId":"id","players":[{"id":"playerId","name":"playerName"}]}` or `{"command":"ERROR","message":"Cannot get players. No room joined."}` |
-| `RELAY_MESSAGE` | Client → Srv | `{"command":"RELAY_MESSAGE","targetId":"playerId","message":"text"}` | `{"command":"RELAY_OK","targetId":"playerId"}` or `{"command":"ERROR","message":"Target player not found."}` |
-| `PLAYER_INFO`  | Client → Srv | `{"command":"PLAYER_INFO"}`                    | `{"command":"PLAYER_INFO","playerInfo":{"id":"id","name":"playerName","currentRoomId":"roomId"}}` |
-| `START_GAME`   | Client → Srv | `{"command":"START_GAME"}`                     | `{"command":"GAME_STARTED","roomId":"roomId","spawnPositions":{"playerId1":{"x":66,"y":-2,"z":0.8},"playerId2":{"x":60,"y":-2,"z":0.8}}}` or `{"command":"ERROR","message":"Cannot start game. Only the host can start the game."}` |
-| `BYE`          | Client → Srv | `{"command":"BYE"}`                            | `{"command":"BYE_OK"}` |
-| Any other      | Client → Srv | e.g. `{"command":"FOO"}`                        | `{"command":"UNKNOWN_COMMAND","originalCommand":"FOO"}` |
+1. **During Registration** (first time using a username):
+   - When setting a player name for the first time, a password can be provided
+   - The server will store the password hash for that player name
+   - Example: `{"command":"NAME","name":"playerName","password":"secretPassword"}`
+
+2. **During Login** (using an existing username):
+   - When connecting with a previously used name, password verification is required
+   - If the password matches, the player is marked as authenticated
+   - If the password is incorrect, an AUTH_FAILED response is sent
+   - Example: `{"command":"NAME","name":"playerName","password":"secretPassword"}`
+
+3. **Separate Authentication**:
+   - Players can also set their name first, then authenticate separately
+   - Example: `{"command":"AUTHENTICATE","password":"secretPassword"}`
+
+4. **Command Restrictions**:
+   - Some commands require authentication (creating/joining rooms, game actions)
+   - Basic commands like PING, LIST_ROOMS, etc. work without authentication
+   - Attempting to use restricted commands while unauthenticated results in an error
+
+### 3.3 Supported Commands
+
+| Command        | Direction    | Payload (JSON)                                    | Response (JSON)                         | Requires Auth |
+| -------------- | ------------ | ------------------------------------------------- | --------------------------------------- | ------------- |
+| `NAME`         | Client → Srv | `{"command":"NAME","name":"playerName","password":"secret"}` | `{"command":"NAME_OK","name":"playerName","authenticated":true}` or `{"command":"AUTH_FAILED","message":"Invalid password for this player name."}` | No |
+| `AUTHENTICATE` | Client → Srv | `{"command":"AUTHENTICATE","password":"secret"}` | `{"command":"AUTH_OK","name":"playerName"}` or `{"command":"AUTH_FAILED","message":"Invalid password."}` | No |
+| `CREATE_ROOM`  | Client → Srv | `{"command":"CREATE_ROOM","name":"roomName"}`   | `{"command":"ROOM_CREATED","roomId":"id","name":"roomName"}` | Yes |
+| `JOIN_ROOM`    | Client → Srv | `{"command":"JOIN_ROOM","roomId":"id"}`         | `{"command":"JOIN_OK","roomId":"id"}` or `{"command":"ERROR","message":"Failed to join room. Room may be full or inactive."}` | Yes |
+| `LEAVE_ROOM`   | Client → Srv | `{"command":"LEAVE_ROOM"}`                      | `{"command":"LEAVE_OK","roomId":"id"}` or `{"command":"ERROR","message":"Cannot leave room. No room joined."}` | Yes |
+| `PING`         | Client → Srv | `{"command":"PING"}`                            | `{"command":"PONG"}`                  | No |
+| `LIST_ROOMS`   | Client → Srv | `{"command":"LIST_ROOMS"}`                     | `{"command":"ROOM_LIST","rooms":[{"id":"id","name":"roomName","playerCount":0,"isActive":false,"hostId":"hostId"}]}` | No |
+| `GET_ROOM_PLAYERS` | Client → Srv | `{"command":"GET_ROOM_PLAYERS"}`          | `{"command":"ROOM_PLAYERS","roomId":"id","players":[{"id":"playerId","name":"playerName"}]}` or `{"command":"ERROR","message":"Cannot get players. No room joined."}` | Yes |
+| `RELAY_MESSAGE` | Client → Srv | `{"command":"RELAY_MESSAGE","targetId":"playerId","message":"text"}` | `{"command":"RELAY_OK","targetId":"playerId"}` or `{"command":"ERROR","message":"Target player not found."}` | Yes |
+| `PLAYER_INFO`  | Client → Srv | `{"command":"PLAYER_INFO"}`                    | `{"command":"PLAYER_INFO","playerInfo":{"id":"id","name":"playerName","currentRoomId":"roomId"}}` | No |
+| `START_GAME`   | Client → Srv | `{"command":"START_GAME"}`                     | `{"command":"GAME_STARTED","roomId":"roomId","spawnPositions":{"playerId1":{"x":66,"y":-2,"z":0.8},"playerId2":{"x":60,"y":-2,"z":0.8}}}` or `{"command":"ERROR","message":"Cannot start game. Only the host can start the game."}` | Yes |
+| `BYE`          | Client → Srv | `{"command":"BYE"}`                            | `{"command":"BYE_OK"}` | No |
+| Any other      | Client → Srv | e.g. `{"command":"FOO"}`                        | `{"command":"UNKNOWN_COMMAND","originalCommand":"FOO"}` | - |
 
 #### Server-to-Client Messages
 The server may also send these messages without a direct client request:
@@ -53,10 +78,12 @@ The server may also send these messages without a direct client request:
 | ------- | ------- | ------ |
 | `RELAYED_MESSAGE` | Message relayed from another player | `{"command":"RELAYED_MESSAGE","senderId":"id","senderName":"name","message":"text"}` |
 | `GAME_STARTED` | Notification that a game has started | `{"command":"GAME_STARTED","roomId":"roomId","hostId":"hostId","spawnPositions":{"playerId1":{"x":66,"y":-2,"z":0.8},"playerId2":{"x":60,"y":-2,"z":0.8}}}` |
+| `AUTH_FAILED` | Authentication failure notification | `{"command":"AUTH_FAILED","message":"Invalid password for this player name."}` |
 
 #### Error Handling
 - Malformed JSON commands return `{"command":"ERROR","message":"Invalid JSON format"}`.
 - Unrecognized commands return `{"command":"UNKNOWN_COMMAND","originalCommand":"cmd"}`.
+- Authentication errors return `{"command":"ERROR","message":"Authentication required. Please use NAME command with password."}` or `{"command":"AUTH_FAILED","message":"Invalid password."}`.
 - If server detects inactivity (>60 s without messages), it will close the TCP socket.
 - Common error messages include:
   - `"Room not found."`
@@ -272,10 +299,10 @@ class RacingClient
         Console.WriteLine(welcome); // "CONNECTED|<sessionId>"
         _sessionId = welcome.Split('|')[1];
 
-        // Set name
-        await SendJsonAsync(new { command = "NAME", name = "Speedy" });
+        // Set name with password
+        await SendJsonAsync(new { command = "NAME", name = "Speedy", password = "secret123" });
         var response = await reader.ReadLineAsync();
-        Console.WriteLine(response); // {"command":"NAME_OK","name":"Speedy"}
+        Console.WriteLine(response); // {"command":"NAME_OK","name":"Speedy","authenticated":true}
 
         // Create a room
         await SendJsonAsync(new { command = "CREATE_ROOM", name = "FastTrack" });
@@ -300,9 +327,20 @@ class RacingClient
 - Sessions are created when a client connects via TCP
 - Each session has a unique ID that's shared with the client
 - Inactivity timeout: Sessions with no activity for > 60 seconds are disconnected
-- Sessions track player name, current room, and last activity time
+- Sessions track player name, authentication status, current room, and last activity time
 
-### 7.2 Player Information Structure
+### 7.2 Authentication Process
+1. **Initial Connection**: A player connects and receives a session ID
+2. **Name Registration**: 
+   - New players set their name and password using the NAME command
+   - The server stores a hash of the password for future verification
+3. **Authentication**:
+   - When a player reconnects with a previously used name, they must provide the correct password
+   - Authentication can happen in the NAME command or separately with AUTHENTICATE
+   - Successfully authenticated players can access all game features
+   - Unauthenticated players can only use basic commands like listing rooms
+
+### 7.3 Player Information Structure
 The server maintains player information using the `PlayerInfo` record with the following properties:
 - `Id`: Unique player identifier (matches session ID)
 - `Name`: Display name of the player
@@ -312,7 +350,7 @@ The server maintains player information using the `PlayerInfo` record with the f
 
 This structure is used to track player state and share it with other players in the same room.
 
-### 7.3 Spawn Positions and Game Start
+### 7.4 Spawn Positions and Game Start
 When a host starts a game:
 1. The server assigns a spawn position to each player in the room
 2. The spawn positions are sent to all players as part of the `GAME_STARTED` notification
@@ -393,13 +431,96 @@ The server supports two types of real-time data that are synchronized between pl
   dotnet run --verbosity normal
   ```
 
-## 11. Next Steps
+## 11. Dashboard Web Interface
+
+### 11.1 Overview
+The server includes a web-based dashboard interface for monitoring and administering the server. The dashboard is accessible via HTTP on port 8080.
+
+### 11.2 Dashboard Features
+- Real-time monitoring of server statistics:
+  - Server uptime
+  - Active player sessions
+  - Room count and status
+  - Player counts
+- Room management:
+  - View all active rooms
+  - View player distribution across rooms
+  - See room status (lobby or active game)
+  - Age of each room
+- Player session management:
+  - Monitor active player connections
+  - Check which room each player is in
+  - Track player activity
+
+### 11.3 Admin Controls
+The dashboard includes administrative controls for server management. These controls do not require authentication as the dashboard is intended for LAN-only access and not exposed to the internet.
+
+#### Room Admin Controls
+- **Close Room**: Remove a specific room and return all players to the lobby
+- **Close All Rooms**: Remove all rooms and reset all player room associations
+
+#### Player Admin Controls
+- **Disconnect Player**: Forcibly disconnect a specific player session
+- **Disconnect All Players**: Disconnect all active player sessions
+
+#### Admin Actions Process
+When an admin action is performed:
+1. The action is processed on the server
+2. Affected players receive appropriate notifications
+3. Resources are cleaned up (players removed from rooms, etc.)
+4. Host status is transferred if necessary
+5. The dashboard refreshes to show updated state
+
+### 11.4 Accessing the Dashboard
+- The dashboard is available at `http://server-ip:8080`
+- It auto-refreshes every 10 seconds, with an option for manual refresh
+- No login is required as it's designed for LAN-only access
+
+## 12. Next Steps
 - Add authentication/tokens for secure player identification
 - Implement chat functionality
 - Add race-specific features like lap counting and race timing
-- Add server admin commands for room management
 - Optimize UDP broadcast for large player counts
 - Implement game state synchronization for deterministic physics
+
+## 13. Authentication System
+
+### 13.1 Purpose
+The authentication system provides a simple identity protection mechanism where:
+- Players can claim and protect their unique usernames
+- Re-connecting with the same name requires password verification
+- Only basic commands are available without authentication
+- Game-related features require successful authentication
+
+### 13.2 Password Handling
+The server uses SHA-256 hashing for password storage:
+- Passwords are never stored in plain text
+- Each player name has its own associated password hash
+- The first time a name is used, the provided password is stored
+- Subsequent connections must use the same password
+
+### 13.3 Client Implementation
+Client applications should:
+1. Store the player's name and password locally
+2. Send the password with the NAME command on reconnection
+3. Handle AUTH_FAILED responses appropriately:
+   - Show an error message to the user
+   - Request the correct password
+   - Offer to use a different name
+
+### 13.4 Authentication States
+Players can be in one of two authentication states:
+1. **Unauthenticated**: Limited to basic commands
+2. **Authenticated**: Full access to all game features
+
+### 13.5 Recommended Client Workflow
+```
+1. Connect to server → Receive session ID
+2. Ask user for name and password
+3. Send NAME command with credentials
+4. If AUTH_FAILED, prompt user again or choose new name
+5. Once authenticated (NAME_OK with authenticated=true), proceed with game
+```
 
 ---
 
