@@ -1,39 +1,56 @@
 using System;
-using System.Buffers;
-using System.IO.Pipelines;
-using System.Net;
-using System.Net.Sockets;
-using System.Collections.Concurrent;
 using System.Threading;
 using System.Threading.Tasks;
+using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.DependencyInjection;
-using System.Numerics;
 
 // Setup cancellation tokens for clean shutdown
 var serverCts = new CancellationTokenSource();
 var appCts = new CancellationTokenSource();
 
-var builder = Host.CreateApplicationBuilder(args);
-builder.Logging.AddConsole();
-var host = builder.Build();
+// Create builder for the web application
+var builder = WebApplication.CreateBuilder(args);
 
-// Create the server
-var server = new RacingServer(7777, 7778, host.Services.GetRequiredService<ILogger<RacingServer>>());
+// Add services to the container
+builder.Services.AddControllersWithViews();
+builder.Logging.AddConsole();
+
+// Create the racing server and register it as a singleton
+var server = new RacingServer(7777, 7778, builder.Services.BuildServiceProvider().GetRequiredService<ILogger<RacingServer>>());
+builder.Services.AddSingleton(server);
+
+// Build the web application
+var app = builder.Build();
 
 try
 {
-    // Start server
+    // Configure the HTTP request pipeline
+    if (!app.Environment.IsDevelopment())
+    {
+        app.UseExceptionHandler("/Home/Error");
+    }
+    
+    app.UseStaticFiles();
+    app.UseRouting();
+    app.UseAuthorization();
+    
+    app.MapControllerRoute(
+        name: "default",
+        pattern: "{controller=Dashboard}/{action=Index}/{id?}");
+    
+    // Start the racing server
     await server.StartAsync(serverCts.Token);
     Console.WriteLine("Server started! Type 'help' for available commands.");
     
-    // Launch UI in separate task
+    // Launch console UI in separate task
     var consoleUI = new ConsoleUI(server, serverCts);
     _ = Task.Run(() => consoleUI.RunAsync(appCts.Token));
     
-    // Run until host is stopped
-    await host.RunAsync(appCts.Token);
+    // Run the web application on port 8080
+    app.Urls.Add("http://localhost:8080");
+    await app.RunAsync(appCts.Token);
 }
 catch (OperationCanceledException)
 {
