@@ -17,6 +17,24 @@ namespace MP.Server.Controllers
             return View();
         }
 
+        public IActionResult RoomViewer(string id)
+        {
+            var room = _server.GetAllRooms().FirstOrDefault(r => r.Id == id);
+        
+            if (room == null)
+            {
+                return RedirectToAction("Index");
+            }
+        
+            ViewBag.RoomName = room.Name;
+            return View(id);
+        }
+        
+        public IActionResult ModelUploader()
+        {
+            return View();
+        }
+
         [HttpGet]
         public IActionResult GetStats()
         {

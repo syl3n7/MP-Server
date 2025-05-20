@@ -17,12 +17,14 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddControllersWithViews();
 builder.Logging.AddConsole();
 
-// Create the racing server and register it as a singleton
-var server = new RacingServer(8443, 8443, builder.Services.BuildServiceProvider().GetRequiredService<ILogger<RacingServer>>());
-builder.Services.AddSingleton(server);
+// Register the RacingServer type
+builder.Services.AddSingleton<RacingServer>(serviceProvider => 
+    new RacingServer(8443, 8443, serviceProvider.GetRequiredService<ILogger<RacingServer>>())
+);
 
 // Build the web application
 var app = builder.Build();
+var server = app.Services.GetRequiredService<RacingServer>();
 
 try
 {

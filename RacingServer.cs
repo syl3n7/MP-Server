@@ -222,7 +222,7 @@ public sealed class RacingServer : IHostedService, IDisposable
                         var playerInfo = new PlayerInfo(
                             session.Id,
                             session.PlayerName,
-                            remoteEndPoint as IPEndPoint,
+                            remoteEndPoint as IPEndPoint ?? new IPEndPoint(IPAddress.Any, 0),
                             ParseVector3(root, "position"),
                             ParseQuaternion(root, "rotation")
                         );
@@ -364,7 +364,7 @@ public sealed class RacingServer : IHostedService, IDisposable
                     byte[] bytes = Encoding.UTF8.GetBytes(json);
                     
                     // Send the update to the player
-                    await _udpListener.SendToAsync(bytes, player.UdpEndpoint);
+                    await _udpListener!.SendToAsync(bytes, player.UdpEndpoint);
                     
                     _logger.LogDebug("📤 Broadcast position update from {SenderId} to {ReceiverId}", senderId, player.Id);
                 }
