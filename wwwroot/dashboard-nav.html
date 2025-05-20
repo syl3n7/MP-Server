@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Racing Server Dashboard Navigation</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            line-height: 1.6;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f8f9fa;
+            border-radius: 5px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            border-bottom: 1px solid #ddd;
+            padding-bottom: 10px;
+        }
+        h2 {
+            color: #444;
+            margin-top: 20px;
+        }
+        .link-section {
+            margin-bottom: 30px;
+        }
+        .btn {
+            display: inline-block;
+            margin: 5px;
+            padding: 8px 16px;
+            background-color: #007bff;
+            color: white;
+            text-decoration: none;
+            border-radius: 4px;
+            font-weight: bold;
+        }
+        .btn:hover {
+            background-color: #0056b3;
+        }
+        .btn-secondary {
+            background-color: #6c757d;
+        }
+        .btn-secondary:hover {
+            background-color: #545b62;
+        }
+        code {
+            background-color: #f0f0f0;
+            padding: 2px 4px;
+            border-radius: 3px;
+            font-family: SFMono-Regular, Consolas, "Liberation Mono", Menlo, monospace;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Racing Server Dashboard Navigation</h1>
+        <p>Access all components of your racing server dashboard using the links below:</p>
+        
+        <div class="link-section">
+            <h2>Main Dashboard</h2>
+            <p>The main dashboard interface with server statistics, active rooms, and player sessions:</p>
+            <a href="/Dashboard/Index" class="btn">Main Dashboard</a>
+        </div>
+        
+        <div class="link-section">
+            <h2>3D Model Management</h2>
+            <p>Upload and manage 3D models for race tracks:</p>
+            <a href="/Dashboard/ModelUploader" class="btn">Model Uploader</a>
+        </div>
+        
+        <div class="link-section">
+            <h2>Active Rooms</h2>
+            <p>The following active rooms have 3D viewers available:</p>
+            <div id="active-rooms">Loading rooms...</div>
+        </div>
+        
+        <div class="link-section">
+            <h2>API Documentation</h2>
+            <p>Key API endpoints for the dashboard:</p>
+            <ul>
+                <li><code>/api/RoomData/rooms</code> - List all rooms</li>
+                <li><code>/api/RoomData/room/{roomId}/players</code> - Get players in a specific room</li>
+                <li><code>/api/ModelUploader/list</code> - List available 3D models</li>
+            </ul>
+        </div>
+        
+        <div class="link-section">
+            <h2>Troubleshooting</h2>
+            <p>Common issues and solutions:</p>
+            <ul>
+                <li><strong>Missing 3D viewer link:</strong> Make sure you're using the main dashboard to view room information</li>
+                <li><strong>3D models not loading:</strong> Upload models through the Model Uploader</li>
+                <li><strong>Can't see players in 3D view:</strong> Players need to be connected and sending position updates</li>
+            </ul>
+        </div>
+    </div>
+    
+    <script>
+        // Fetch active rooms and create links to their 3D viewers
+        document.addEventListener('DOMContentLoaded', function() {
+            fetch('/api/RoomData/rooms')
+                .then(response => response.json())
+                .then(rooms => {
+                    const roomsContainer = document.getElementById('active-rooms');
+                    
+                    if (rooms.length === 0) {
+                        roomsContainer.innerHTML = "<p>No active rooms found.</p>";
+                        return;
+                    }
+                    
+                    let html = '';
+                    rooms.forEach(room => {
+                        html += `
+                            <a href="/Dashboard/RoomViewer/${room.id}" class="btn" title="${room.name}">
+                                ${room.name} (${room.playerCount} players)
+                            </a>
+                        `;
+                    });
+                    
+                    roomsContainer.innerHTML = html;
+                })
+                .catch(error => {
+                    document.getElementById('active-rooms').innerHTML = 
+                        `<p>Error loading rooms: ${error.message}</p>`;
+                });
+        });
+    </script>
+</body>
+</html>
