@@ -2,6 +2,7 @@ using System;
 using System.Buffers;
 using System.IO.Pipelines;
 using System.Net.Sockets;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Threading;
@@ -22,6 +23,7 @@ public sealed class PlayerSession : IDisposable
     public DateTime LastActivity { get; private set; } = DateTime.UtcNow;
     public string? CurrentRoomId { get; set; }
     public string PlayerName { get; set; } = "Anonymous";
+    public bool IsAuthenticated { get; set; } = false;
     
     public PlayerSession(Socket socket, RacingServer server)
     {
@@ -98,14 +100,61 @@ public sealed class PlayerSession : IDisposable
             var command = commandElement.GetString()?.ToUpper();
             if (string.IsNullOrEmpty(command)) return;
             
+            // Check if command requires authentication
+            if (RequiresAuthentication(command) && !IsAuthenticated)
+            {
+                await SendJsonAsync(new { command = "ERROR", message = "Authentication required. Please use NAME command with password." }, ct);
+                return;
+            }
+            
             switch (command)
             {
                 case "NAME":
                     if (jsonMessage.TryGetProperty("name", out var nameElement))
                     {
+                        bool authenticationSuccessful = true;
+                        string rawPassword = string.Empty;
+                        
+                        // Check if password is provided for authentication
+                        if (jsonMessage.TryGetProperty("password", out var passwordElement))
+                        {
+                            rawPassword = passwordElement.GetString() ?? string.Empty;
+                            
+                            // Check if this player name already exists in the server
+                            var existingPlayer = _server.GetPlayerByName(nameElement.GetString() ?? string.Empty);
+                            
+                            if (existingPlayer != null && existingPlayer.Id != Id)
+                            {
+                                // Verify the password against stored hash
+                                authenticationSuccessful = _server.VerifyPlayerPassword(
+                                    nameElement.GetString() ?? string.Empty, 
+                                    rawPassword
+                                );
+                                
+                                if (!authenticationSuccessful)
+                                {
+                                    await SendJsonAsync(new { command = "AUTH_FAILED", message = "Invalid password for this player name." }, ct);
+                                    break;
+                                }
+                            }
+                            else
+                            {
+                                // New player or same player reconnecting - register the password
+                                _server.RegisterPlayerPassword(nameElement.GetString() ?? string.Empty, rawPassword);
+                            }
+                        }
+                        
                         PlayerName = nameElement.GetString() ?? "Anonymous";
-                        _server.Logger.LogInformation("👤 Player {SessionId} set name to '{Name}'", Id, PlayerName);
-                        await SendJsonAsync(new { command = "NAME_OK", name = PlayerName }, ct);
+                        IsAuthenticated = authenticationSuccessful;
+                        
+                        _server.Logger.LogInformation("👤 Player {SessionId} set name to '{Name}' and {AuthStatus}", 
+                            Id, PlayerName, IsAuthenticated ? "authenticated" : "is not authenticated");
+                        
+                        await SendJsonAsync(new { 
+                            command = "NAME_OK", 
+                            name = PlayerName, 
+                            authenticated = IsAuthenticated 
+                        }, ct);
                     }
                     break;
                     
@@ -363,6 +412,40 @@ public sealed class PlayerSession : IDisposable
                     await DisconnectAsync();
                     break;
                     
+                case "AUTHENTICATE":
+                    if (jsonMessage.TryGetProperty("password", out var authPasswordElement))
+                    {
+                        var password = authPasswordElement.GetString() ?? string.Empty;
+                        
+                        if (string.IsNullOrEmpty(PlayerName) || PlayerName == "Anonymous")
+                        {
+                            await SendJsonAsync(new { 
+                                command = "AUTH_FAILED", 
+                                message = "Please set your name first with the NAME command."
+                            }, ct);
+                            break;
+                        }
+                        
+                        bool authResult = _server.VerifyPlayerPassword(PlayerName, password);
+                        IsAuthenticated = authResult;
+                        
+                        if (authResult)
+                        {
+                            _server.Logger.LogInformation("🔐 Player {SessionId} ({Name}) authenticated successfully", Id, PlayerName);
+                            await SendJsonAsync(new { command = "AUTH_OK", name = PlayerName }, ct);
+                        }
+                        else
+                        {
+                            _server.Logger.LogInformation("🔒 Player {SessionId} ({Name}) authentication failed", Id, PlayerName);
+                            await SendJsonAsync(new { command = "AUTH_FAILED", message = "Invalid password." }, ct);
+                        }
+                    }
+                    else
+                    {
+                        await SendJsonAsync(new { command = "ERROR", message = "Password is required for authentication." }, ct);
+                    }
+                    break;
+
                 default:
                     _server.Logger.LogWarning("⚠️ Unknown command from {SessionId}: {Command}", Id, command);
                     await SendJsonAsync(new { command = "UNKNOWN_COMMAND", originalCommand = command }, ct);
@@ -377,6 +460,25 @@ public sealed class PlayerSession : IDisposable
         catch (Exception ex)
         {
             _server.Logger.LogError(ex, "❌ Error processing message for session {SessionId}", Id);
+        }
+    }
+
+    private bool RequiresAuthentication(string command)
+    {
+        // List of commands that require authentication
+        switch (command)
+        {
+            case "NAME":
+            case "AUTHENTICATE": 
+            case "PING":
+            case "BYE":
+            case "PLAYER_INFO":
+            case "LIST_ROOMS":
+                // These commands are allowed without authentication
+                return false;
+            default:
+                // All other commands require authentication
+                return true;
         }
     }
 

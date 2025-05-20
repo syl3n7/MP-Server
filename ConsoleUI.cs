@@ -49,6 +49,10 @@ public class ConsoleUI
                     ShowStats();
                     break;
                     
+                case "dashboard":
+                    ShowDashboardInfo();
+                    break;
+                    
                 case "quit":
                 case "exit":
                     Console.WriteLine("Shutting down server...");
@@ -65,11 +69,12 @@ public class ConsoleUI
     private void PrintHelp()
     {
         Console.WriteLine("Available commands:");
-        Console.WriteLine("  help     - Show this help message");
-        Console.WriteLine("  rooms    - List all game rooms");
-        Console.WriteLine("  sessions - List all active player sessions");
-        Console.WriteLine("  stats    - Show server statistics");
-        Console.WriteLine("  quit     - Shut down the server");
+        Console.WriteLine("  help      - Show this help message");
+        Console.WriteLine("  rooms     - List all game rooms");
+        Console.WriteLine("  sessions  - List all active player sessions");
+        Console.WriteLine("  stats     - Show server statistics");
+        Console.WriteLine("  dashboard - Show web dashboard information");
+        Console.WriteLine("  quit      - Shut down the server");
     }
 
     private void ListRooms()
@@ -124,6 +129,21 @@ public class ConsoleUI
         Console.WriteLine($"Total Rooms: {rooms.Count}");
         Console.WriteLine($"Active Games: {rooms.Count(r => r.IsActive)}");
         Console.WriteLine($"Players In Rooms: {rooms.Sum(r => r.PlayerCount)}");
+    }
+
+    private void ShowDashboardInfo()
+    {
+        Console.WriteLine("Web Dashboard Information");
+        Console.WriteLine("------------------------");
+        Console.WriteLine("Dashboard URL: http://localhost:8080");
+        Console.WriteLine("");
+        Console.WriteLine("The web dashboard provides a graphical interface to monitor:");
+        Console.WriteLine("- Server statistics (uptime, active sessions, rooms)");
+        Console.WriteLine("- Active game rooms and their status");
+        Console.WriteLine("- Connected player sessions");
+        Console.WriteLine("");
+        Console.WriteLine("The dashboard refreshes automatically every 10 seconds");
+        Console.WriteLine("or you can click the Refresh button for immediate updates.");
     }
 
     private string TruncateString(string str, int maxLength)
