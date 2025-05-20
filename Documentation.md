@@ -5,8 +5,8 @@ MP-Server is a simple TCP/UDP racing‐game server.
 Clients connect over TCP (for commands, room management, chat) and send/receive UDP packets (for real‐time position updates).
 
 Ports (defaults):
-- TCP: 7777
-- UDP: 7778
+- TCP: 8443
+- UDP: 8443
 
 ## 2. Prerequisites
 - .NET 9.0 runtime
@@ -19,7 +19,7 @@ Ports (defaults):
 
 ### 3.1 Connection & Framing
 1. Client opens a TCP connection to server:  
-   `tcpClient.Connect("server.address", 7777)`
+   `tcpClient.Connect("server.address", 8443)`
 2. Server immediately responds with a welcome message terminated by `\n`:  
    ```
    CONNECTED|<sessionId>\n
@@ -164,7 +164,7 @@ var posUpdate = new {
 };
 var json = JsonSerializer.Serialize(posUpdate) + "\n";
 var bytes = Encoding.UTF8.GetBytes(json);
-await udp.SendAsync(bytes, bytes.Length, serverHost, 7778);
+await udp.SendAsync(bytes, bytes.Length, serverHost, 8443);
 ```
 
 ### 4.6 Example (C# receive)

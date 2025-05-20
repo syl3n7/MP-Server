@@ -20,7 +20,7 @@ builder.Logging.AddConsole();
 var host = builder.Build();
 
 // Create the server
-var server = new RacingServer(7777, 7778, host.Services.GetRequiredService<ILogger<RacingServer>>());
+var server = new RacingServer(8443, 8443, host.Services.GetRequiredService<ILogger<RacingServer>>());
 
 try
 {
