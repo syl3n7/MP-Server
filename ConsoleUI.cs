@@ -124,11 +124,31 @@ public class ConsoleUI
         
         Console.WriteLine("Server Statistics");
         Console.WriteLine("-----------------");
-        Console.WriteLine($"Server Uptime: {DateTime.UtcNow - _server.StartTime}");
+        Console.WriteLine($"Server Uptime: {FormatUptime(DateTime.UtcNow - _server.StartTime)}");
         Console.WriteLine($"Active Sessions: {sessions.Count}");
         Console.WriteLine($"Total Rooms: {rooms.Count}");
         Console.WriteLine($"Active Games: {rooms.Count(r => r.IsActive)}");
         Console.WriteLine($"Players In Rooms: {rooms.Sum(r => r.PlayerCount)}");
+    }
+    
+    private string FormatUptime(TimeSpan timeSpan)
+    {
+        if (timeSpan.TotalDays >= 1)
+        {
+            return $"{timeSpan.Days}d {timeSpan.Hours}h {timeSpan.Minutes}m";
+        }
+        else if (timeSpan.TotalHours >= 1)
+        {
+            return $"{timeSpan.Hours}h {timeSpan.Minutes}m {timeSpan.Seconds}s";
+        }
+        else if (timeSpan.TotalMinutes >= 1)
+        {
+            return $"{timeSpan.Minutes}m {timeSpan.Seconds}s";
+        }
+        else
+        {
+            return $"{timeSpan.Seconds}s";
+        }
     }
 
     private void ShowDashboardInfo()

@@ -368,25 +368,8 @@
             }
             
             function formatTimeSpan(timeString) {
-                // Parse ISO 8601 duration format
-                const matches = timeString.match(/P(?:(\d+)D)?T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)(?:\.\d+)?S)?/);
-                if (!matches) {
-                    return timeString;
-                }
-                
-                const days = matches[1] ? parseInt(matches[1]) : 0;
-                const hours = matches[2] ? parseInt(matches[2]) : 0;
-                const minutes = matches[3] ? parseInt(matches[3]) : 0;
-                const seconds = matches[4] ? parseInt(matches[4]) : 0;
-                
-                // Format parts that exist
-                let parts = [];
-                if (days > 0) parts.push(`${days}d`);
-                if (hours > 0) parts.push(`${hours}h`);
-                if (minutes > 0) parts.push(`${minutes}m`);
-                if (seconds > 0 || parts.length === 0) parts.push(`${seconds}s`);
-                
-                return parts.join(' ');
+                // The uptime is already formatted as a human-readable string
+                return timeString;
             }
             
             function getTimeAgo(date) {

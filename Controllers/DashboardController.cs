@@ -25,7 +25,7 @@ namespace MP.Server.Controllers
             
             var stats = new
             {
-                uptime = DateTime.UtcNow - _server.StartTime,
+                uptime = FormatUptime(DateTime.UtcNow - _server.StartTime),
                 activeSessions = sessions.Count,
                 totalRooms = rooms.Count,
                 activeGames = rooms.Count(r => r.IsActive),
@@ -33,6 +33,27 @@ namespace MP.Server.Controllers
             };
 
             return Json(stats);
+        }
+
+        // Helper method to format uptime in a human readable format
+        private string FormatUptime(TimeSpan timeSpan)
+        {
+            if (timeSpan.TotalDays >= 1)
+            {
+                return $"{timeSpan.Days}d {timeSpan.Hours}h {timeSpan.Minutes}m";
+            }
+            else if (timeSpan.TotalHours >= 1)
+            {
+                return $"{timeSpan.Hours}h {timeSpan.Minutes}m {timeSpan.Seconds}s";
+            }
+            else if (timeSpan.TotalMinutes >= 1)
+            {
+                return $"{timeSpan.Minutes}m {timeSpan.Seconds}s";
+            }
+            else
+            {
+                return $"{timeSpan.Seconds}s";
+            }
         }
 
         [HttpGet]
