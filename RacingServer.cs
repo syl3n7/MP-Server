@@ -13,6 +13,8 @@ using System.Threading.Tasks;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using System.Numerics;
+using System.Linq;
+using System.IO;
 using MP.Server;
 
 public sealed class RacingServer : IHostedService, IDisposable
@@ -355,7 +357,7 @@ public sealed class RacingServer : IHostedService, IDisposable
 
     private async Task BroadcastPositionUpdateAsync(PlayerInfo playerInfo, string roomId, string senderId)
     {
-        if (_rooms.TryGetValue(roomId, out GameRoom room))
+        if (_rooms.TryGetValue(roomId, out GameRoom? room) && room != null)
         {
             foreach (var player in room.Players)
             {
@@ -380,7 +382,10 @@ public sealed class RacingServer : IHostedService, IDisposable
                     byte[] bytes = Encoding.UTF8.GetBytes(json);
                     
                     // Send the update to the player
-                    await _udpListener.SendToAsync(bytes, player.UdpEndpoint);
+                    if (_udpListener != null)
+                    {
+                        await _udpListener.SendToAsync(bytes, player.UdpEndpoint);
+                    }
                     
                     _logger.LogDebug("📤 Broadcast position update from {SenderId} to {ReceiverId}", senderId, player.Id);
                 }
@@ -555,7 +560,7 @@ public sealed class RacingServer : IHostedService, IDisposable
             if (File.Exists(certPath))
             {
                 _logger.LogInformation("🔐 Loading existing certificate from {CertPath}", certPath);
-                return new X509Certificate2(certPath, certPassword);
+                return X509CertificateLoader.LoadPkcs12FromFile(certPath, certPassword);
             }
             
             // Generate new self-signed certificate
@@ -581,8 +586,8 @@ public sealed class RacingServer : IHostedService, IDisposable
         var request = new CertificateRequest($"CN={subjectName}", rsa, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
         
         // Add extensions for server authentication
-        request.Extensions.Add(new X509KeyUsageExtension(X509KeyUsageFlags.DigitalSignature | X509KeyUsageFlags.KeyEncipherment, false));
-        request.Extensions.Add(new X509EnhancedKeyUsageExtension(new OidCollection { new Oid("1.3.6.1.5.5.7.3.1") }, false)); // Server Authentication
+        request.CertificateExtensions.Add(new X509KeyUsageExtension(X509KeyUsageFlags.DigitalSignature | X509KeyUsageFlags.KeyEncipherment, false));
+        request.CertificateExtensions.Add(new X509EnhancedKeyUsageExtension(new OidCollection { new Oid("1.3.6.1.5.5.7.3.1") }, false)); // Server Authentication
         
         // Add Subject Alternative Names
         var sanBuilder = new SubjectAlternativeNameBuilder();
@@ -590,13 +595,13 @@ public sealed class RacingServer : IHostedService, IDisposable
         sanBuilder.AddDnsName("127.0.0.1");
         sanBuilder.AddIpAddress(IPAddress.Loopback);
         sanBuilder.AddIpAddress(IPAddress.IPv6Loopback);
-        request.Extensions.Add(sanBuilder.Build());
+        request.CertificateExtensions.Add(sanBuilder.Build());
         
         // Create certificate valid for 1 year
         var certificate = request.CreateSelfSigned(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddYears(1));
         
         // Export and re-import to ensure private key is properly associated
         var pfxBytes = certificate.Export(X509ContentType.Pfx, password);
-        return new X509Certificate2(pfxBytes, password, X509KeyStorageFlags.Exportable);
+        return X509CertificateLoader.LoadPkcs12(pfxBytes, password);
     }
 }

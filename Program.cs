@@ -17,9 +17,12 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddControllersWithViews();
 builder.Logging.AddConsole();
 
-// Create the racing server and register it as a singleton (with TLS enabled by default)
-var server = new RacingServer(8443, 8443, builder.Services.BuildServiceProvider().GetRequiredService<ILogger<RacingServer>>(), useTls: true);
-builder.Services.AddSingleton(server);
+// Register the racing server as a singleton (with TLS enabled by default)
+builder.Services.AddSingleton<RacingServer>(serviceProvider => 
+{
+    var logger = serviceProvider.GetRequiredService<ILogger<RacingServer>>();
+    return new RacingServer(8443, 8443, logger, useTls: true);
+});
 
 // Build the web application
 var app = builder.Build();
@@ -39,6 +42,9 @@ try
     app.MapControllerRoute(
         name: "default",
         pattern: "{controller=Dashboard}/{action=Index}/{id?}");
+    
+    // Get the racing server from DI container
+    var server = app.Services.GetRequiredService<RacingServer>();
     
     // Start the racing server
     await server.StartAsync(serverCts.Token);
@@ -63,6 +69,7 @@ catch (Exception ex)
 finally
 {
     // Clean shutdown
+    var server = app.Services.GetRequiredService<RacingServer>();
     if (!serverCts.IsCancellationRequested)
         await server.StopAsync();
         
