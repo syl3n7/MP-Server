@@ -565,7 +565,12 @@ public sealed class RacingServer : IHostedService, IDisposable
             
             // Generate new self-signed certificate
             _logger.LogInformation("🔐 Generating new self-signed certificate...");
-            var cert = GenerateSelfSignedCertificate("MP-Racing-Server", certPassword);
+            
+            // Use environment variables to define the public IP or hostname
+            string publicIp = Environment.GetEnvironmentVariable("SERVER_PUBLIC_IP") ?? "89.114.116.19";
+            string hostname = Environment.GetEnvironmentVariable("SERVER_HOSTNAME") ?? "racing-server";
+            
+            var cert = GenerateSelfSignedCertificate(hostname, publicIp, certPassword);
             
             // Save certificate to disk
             File.WriteAllBytes(certPath, cert.Export(X509ContentType.Pfx, certPassword));
@@ -580,7 +585,7 @@ public sealed class RacingServer : IHostedService, IDisposable
         }
     }
     
-    private X509Certificate2 GenerateSelfSignedCertificate(string subjectName, string password)
+    private X509Certificate2 GenerateSelfSignedCertificate(string subjectName, string publicIp, string password)
     {
         using var rsa = RSA.Create(2048);
         var request = new CertificateRequest($"CN={subjectName}", rsa, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
@@ -589,19 +594,80 @@ public sealed class RacingServer : IHostedService, IDisposable
         request.CertificateExtensions.Add(new X509KeyUsageExtension(X509KeyUsageFlags.DigitalSignature | X509KeyUsageFlags.KeyEncipherment, false));
         request.CertificateExtensions.Add(new X509EnhancedKeyUsageExtension(new OidCollection { new Oid("1.3.6.1.5.5.7.3.1") }, false)); // Server Authentication
         
-        // Add Subject Alternative Names
+        // Add multiple Subject Alternative Names to increase compatibility
         var sanBuilder = new SubjectAlternativeNameBuilder();
-        sanBuilder.AddDnsName("localhost");
-        sanBuilder.AddDnsName("127.0.0.1");
-        sanBuilder.AddIpAddress(IPAddress.Loopback);
-        sanBuilder.AddIpAddress(IPAddress.IPv6Loopback);
+        sanBuilder.AddDnsName(subjectName);                 // Primary hostname
+        sanBuilder.AddDnsName("localhost");                 // Local development
+        sanBuilder.AddDnsName("*." + subjectName);          // Wildcard for subdomains
+        sanBuilder.AddDnsName(Environment.MachineName);     // Machine name
+        
+        // Add the public IP
+        sanBuilder.AddDnsName(publicIp);                    // Public IP as DNS name (helps with some clients)
+        sanBuilder.AddIpAddress(IPAddress.Parse(publicIp)); // Public IP as IP address
+        
+        try {
+            // Try to add the current machine's hostname and IP addresses
+            string hostname = Dns.GetHostName();
+            sanBuilder.AddDnsName(hostname);
+            
+            var hostAddresses = Dns.GetHostAddresses(hostname);
+            foreach (var ip in hostAddresses)
+            {
+                if (ip.AddressFamily == AddressFamily.InterNetwork || 
+                    ip.AddressFamily == AddressFamily.InterNetworkV6)
+                {
+                    sanBuilder.AddIpAddress(ip);
+                }
+            }
+        }
+        catch (Exception ex) {
+            _logger.LogWarning("Could not add all host IPs to certificate: {Message}", ex.Message);
+        }
+        
+        // Always add these IPs
+        sanBuilder.AddIpAddress(IPAddress.Loopback);        // 127.0.0.1
+        sanBuilder.AddIpAddress(IPAddress.IPv6Loopback);    // ::1
+        sanBuilder.AddIpAddress(IPAddress.Any);             // 0.0.0.0
+        sanBuilder.AddIpAddress(IPAddress.IPv6Any);         // ::
+        
+        // Try to add common LAN IPs (192.168.x.x)
+        try {
+            var networkInterfaces = System.Net.NetworkInformation.NetworkInterface.GetAllNetworkInterfaces();
+            foreach (var netInterface in networkInterfaces)
+            {
+                if (netInterface.OperationalStatus == System.Net.NetworkInformation.OperationalStatus.Up)
+                {
+                    var properties = netInterface.GetIPProperties();
+                    foreach (var ipInfo in properties.UnicastAddresses)
+                    {
+                        if (ipInfo.Address.AddressFamily == AddressFamily.InterNetwork)
+                        {
+                            sanBuilder.AddIpAddress(ipInfo.Address);
+                            _logger.LogDebug("🔐 Added interface IP to certificate: {IP}", ipInfo.Address);
+                        }
+                    }
+                }
+            }
+        }
+        catch (Exception ex) {
+            _logger.LogWarning("Could not add network interface IPs: {Message}", ex.Message);
+        }
+        
         request.CertificateExtensions.Add(sanBuilder.Build());
         
-        // Create certificate valid for 1 year
-        var certificate = request.CreateSelfSigned(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddYears(1));
+        // Create certificate valid for 5 years (long validity for development)
+        var certificate = request.CreateSelfSigned(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddYears(5));
         
-        // Export and re-import to ensure private key is properly associated
+        // Export and re-import with exportable private key
         var pfxBytes = certificate.Export(X509ContentType.Pfx, password);
-        return X509CertificateLoader.LoadPkcs12(pfxBytes, password);
+        
+        var secureCertificate = new X509Certificate2(
+            pfxBytes, 
+            password, 
+            X509KeyStorageFlags.Exportable | X509KeyStorageFlags.PersistKeySet | X509KeyStorageFlags.MachineKeySet
+        );
+        
+        _logger.LogInformation("🔐 Generated certificate with subject: {Subject}, public IP: {IP}", subjectName, publicIp);
+        return secureCertificate;
     }
 }

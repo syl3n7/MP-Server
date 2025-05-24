@@ -601,6 +601,100 @@ When an admin action is performed:
 - **Encryption Negotiation**: Server automatically detects encrypted vs plain UDP packets
 - **Admin Interface**: Dashboard is designed for LAN-only access (no authentication required)
 
+## 13.6 Certificate Handling with Unity Clients
+
+### 13.6.1 Certificate Validation in Unity
+Unity clients might encounter certificate validation issues when connecting to the server:
+```
+Certificate validation failed: RemoteCertificateNameMismatch, RemoteCertificateChainErrors
+```
+
+This happens because:
+1. The server uses a self-signed certificate
+2. The client attempts to validate the certificate against trusted roots (which fails)
+3. The hostname or IP the client connects to might not match what's in the certificate
+
+### 13.6.2 Solution Options
+
+#### Option 1: Bypass Certificate Validation (Development Only)
+For development and testing, you can bypass certificate validation by implementing a custom validation callback:
+
+```csharp
+// In your Unity NetworkManager class
+public bool ValidateServerCertificate(object sender, X509Certificate certificate, 
+                                      X509Chain chain, SslPolicyErrors sslPolicyErrors)
+{
+    Debug.LogWarning($"Certificate validation: {sslPolicyErrors}");
+    
+    // Accept any certificate from our server
+    // IMPORTANT: Only use this for your specific racing server, not general web traffic
+    return true;
+}
+
+// When creating your SslStream
+var sslStream = new SslStream(networkStream, false, ValidateServerCertificate);
+await sslStream.AuthenticateAsClientAsync("your-server-hostname-or-ip");
+```
+
+#### Option 2: Export and Include the Server Certificate
+For better security, you can include the server's public certificate in your game:
+
+1. Export the server's public certificate (without private key)
+2. Include it as a resource in your Unity game
+3. Load and verify against this specific certificate:
+
+```csharp
+public class CertificateHandler
+{
+    private readonly X509Certificate2 _serverCert;
+    
+    public CertificateHandler()
+    {
+        // Load server certificate from resources
+        TextAsset certAsset = Resources.Load<TextAsset>("server-cert");
+        _serverCert = new X509Certificate2(certAsset.bytes);
+    }
+    
+    public bool ValidateServerCertificate(object sender, X509Certificate certificate, 
+                                          X509Chain chain, SslPolicyErrors sslPolicyErrors)
+    {
+        // Only accept our specific server certificate
+        return certificate.GetCertHashString() == _serverCert.GetCertHashString();
+    }
+}
+```
+
+### 13.6.3 Exporting the Server Certificate
+To export the server's public certificate for client validation:
+
+1. From the server machine:
+```bash
+# Export PFX to PEM (public part only)
+openssl pkcs12 -in server.pfx -clcerts -nokeys -out server-public.pem
+```
+
+2. Copy the `server-public.pem` file to your Unity project's Resources folder
+
+### 13.6.4 Certificate Generation Details
+The server automatically generates a certificate with:
+- The server's public IP (obtained from `SERVER_PUBLIC_IP` environment variable or defaults to "89.114.116.19")
+- The server's internal IP addresses
+- The server hostname (`SERVER_HOSTNAME` environment variable or "racing-server")
+- All common network interfaces
+- Common special IPs (loopback, Any)
+
+You can customize the certificate by setting these environment variables before starting the server:
+
+```bash
+# Linux/macOS
+export SERVER_HOSTNAME="my-racing-server"
+export SERVER_PUBLIC_IP="your-public-ip"
+
+# Windows
+set SERVER_HOSTNAME=my-racing-server
+set SERVER_PUBLIC_IP=your-public-ip
+```
+
 ## 14. Authentication System
 
 ### 14.1 Purpose
