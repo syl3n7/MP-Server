@@ -560,7 +560,7 @@ public sealed class RacingServer : IHostedService, IDisposable
             if (File.Exists(certPath))
             {
                 _logger.LogInformation("🔐 Loading existing certificate from {CertPath}", certPath);
-                return X509CertificateLoader.LoadPkcs12FromFile(certPath, certPassword);
+                return ServerCertificateLoader.LoadPkcs12FromFile(certPath, certPassword);
             }
             
             // Generate new self-signed certificate
@@ -661,11 +661,8 @@ public sealed class RacingServer : IHostedService, IDisposable
         // Export and re-import with exportable private key
         var pfxBytes = certificate.Export(X509ContentType.Pfx, password);
         
-        var secureCertificate = new X509Certificate2(
-            pfxBytes, 
-            password, 
-            X509KeyStorageFlags.Exportable | X509KeyStorageFlags.PersistKeySet | X509KeyStorageFlags.MachineKeySet
-        );
+        // Use our own certificate loader to create the certificate with proper flags
+        var secureCertificate = ServerCertificateLoader.LoadPkcs12(pfxBytes, password);
         
         _logger.LogInformation("🔐 Generated certificate with subject: {Subject}, public IP: {IP}", subjectName, publicIp);
         return secureCertificate;

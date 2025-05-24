@@ -8,7 +8,7 @@ namespace MP.Server
     /// <summary>
     /// Helper class for loading X509 certificates across different platforms
     /// </summary>
-    public static class X509CertificateLoader
+    public static class ServerCertificateLoader
     {
         /// <summary>
         /// Loads a PKCS#12 certificate from file with the given password
