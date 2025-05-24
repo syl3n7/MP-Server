@@ -2,7 +2,8 @@ using System;
 using System.Buffers;
 using System.IO.Pipelines;
 using System.Net.Sockets;
-using System.Security.Cryptography;
+using System.Net.Security;
+using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using System.Text.Json;
 using System.Threading;
@@ -10,14 +11,16 @@ using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 using System.Numerics;
 using MP.Server;
+using MP.Server.Security;
 
 public sealed class PlayerSession : IDisposable
 {
     private readonly Socket _socket;
     private readonly RacingServer _server;
-    private readonly NetworkStream _stream;
+    private readonly Stream _stream;
     private readonly PipeReader _reader;
     private readonly PipeWriter _writer;
+    private readonly bool _useTls;
     
     public string Id { get; } = Guid.NewGuid().ToString("N");
     public DateTime LastActivity { get; private set; } = DateTime.UtcNow;
@@ -25,11 +28,42 @@ public sealed class PlayerSession : IDisposable
     public string PlayerName { get; set; } = "Anonymous";
     public bool IsAuthenticated { get; set; } = false;
     
-    public PlayerSession(Socket socket, RacingServer server)
+    // UDP Encryption
+    public UdpEncryption? UdpCrypto { get; private set; }
+    
+    public PlayerSession(Socket socket, RacingServer server, bool useTls = false, X509Certificate2? certificate = null)
     {
         _socket = socket;
         _server = server;
-        _stream = new NetworkStream(socket, ownsSocket: false);
+        _useTls = useTls;
+        
+        // Create network stream
+        var networkStream = new NetworkStream(socket, ownsSocket: false);
+        
+        if (_useTls && certificate != null)
+        {
+            // Create SSL stream
+            var sslStream = new SslStream(networkStream, false);
+            
+            try
+            {
+                // Authenticate as server with the certificate
+                sslStream.AuthenticateAsServer(certificate, false, System.Security.Authentication.SslProtocols.Tls12 | System.Security.Authentication.SslProtocols.Tls13, false);
+                _stream = sslStream;
+                _server.Logger.LogDebug("🔒 TLS handshake completed for session {SessionId}", Id);
+            }
+            catch (Exception ex)
+            {
+                _server.Logger.LogError(ex, "❌ TLS handshake failed for session {SessionId}", Id);
+                sslStream.Dispose();
+                _stream = networkStream; // Fallback to plain text
+            }
+        }
+        else
+        {
+            _stream = networkStream;
+        }
+        
         _reader = PipeReader.Create(_stream);
         _writer = PipeWriter.Create(_stream);
     }
@@ -147,13 +181,21 @@ public sealed class PlayerSession : IDisposable
                         PlayerName = nameElement.GetString() ?? "Anonymous";
                         IsAuthenticated = authenticationSuccessful;
                         
+                        // Initialize UDP encryption for authenticated users
+                        if (IsAuthenticated)
+                        {
+                            UdpCrypto = new UdpEncryption(Id);
+                            _server.Logger.LogDebug("🔐 UDP encryption initialized for session {SessionId}", Id);
+                        }
+                        
                         _server.Logger.LogInformation("👤 Player {SessionId} set name to '{Name}' and {AuthStatus}", 
                             Id, PlayerName, IsAuthenticated ? "authenticated" : "is not authenticated");
                         
                         await SendJsonAsync(new { 
                             command = "NAME_OK", 
                             name = PlayerName, 
-                            authenticated = IsAuthenticated 
+                            authenticated = IsAuthenticated,
+                            udpEncryption = IsAuthenticated // Inform client about UDP encryption availability
                         }, ct);
                     }
                     break;

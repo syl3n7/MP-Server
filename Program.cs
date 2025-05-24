@@ -17,8 +17,8 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddControllersWithViews();
 builder.Logging.AddConsole();
 
-// Create the racing server and register it as a singleton
-var server = new RacingServer(8443, 8443, builder.Services.BuildServiceProvider().GetRequiredService<ILogger<RacingServer>>());
+// Create the racing server and register it as a singleton (with TLS enabled by default)
+var server = new RacingServer(8443, 8443, builder.Services.BuildServiceProvider().GetRequiredService<ILogger<RacingServer>>(), useTls: true);
 builder.Services.AddSingleton(server);
 
 // Build the web application

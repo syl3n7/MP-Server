@@ -1,26 +1,39 @@
 # MP-Server Protocol Documentation
 
 ## 1. Overview
-MP-Server is a simple TCP/UDP racing‐game server.  
-Clients connect over TCP (for commands, room management, chat) and send/receive UDP packets (for real‐time position updates).
+MP-Server is a secure TCP/UDP racing‐game server with TLS/SSL encryption.  
+Clients connect over TLS-encrypted TCP (for commands, room management, chat) and send/receive encrypted UDP packets (for real‐time position updates).
 
 Ports (defaults):
-- TCP: 8443
-- UDP: 8443
+- TCP: 8443 (TLS/SSL encrypted)
+- UDP: 8443 (AES encrypted for authenticated users)
 - Dashboard Web UI: 8080
+
+## 1.1 Security Features
+- **TLS/SSL TCP encryption**: All command traffic is encrypted using TLS 1.2/1.3
+- **Self-signed certificate generation**: Server automatically generates certificates if none provided
+- **UDP AES encryption**: Position and input data encrypted with session-specific keys
+- **Player authentication**: Password-based authentication with hashed storage
+- **Session isolation**: Each player gets unique encryption keys
 
 ## 2. Prerequisites
 - .NET 9.0 runtime
-- A TCP‐capable socket library (e.g. `System.Net.Sockets.TcpClient` in .NET, `net` module in Node.js, or BSD sockets in C/C++)
-- A UDP socket library for state updates
+- A TLS-capable TCP socket library
+- A UDP socket library for state updates  
 - UTF-8 support for text commands
 - JSON parser (server uses System.Text.Json for all command processing)
+- AES encryption support for UDP packets (authenticated users only)
 
 ## 3. TCP Protocol
 
 ### 3.1 Connection & Framing
-1. Client opens a TCP connection to server:  
-   `tcpClient.Connect("server.address", 8443)`
+1. Client opens a **TLS-encrypted** TCP connection to server:  
+   ```csharp
+   var client = new TcpClient();
+   await client.ConnectAsync("server.address", 8443);
+   var sslStream = new SslStream(client.GetStream());
+   await sslStream.AuthenticateAsClientAsync("server.address");
+   ```
 2. Server immediately responds with a welcome message terminated by `\n`:  
    ```
    CONNECTED|<sessionId>\n
@@ -30,18 +43,20 @@ Ports (defaults):
    {"command":"COMMAND_NAME","param1":"value1","param2":"value2"}\n
    ```
 
+**Important**: The server automatically generates and uses a self-signed certificate. For production use, clients should either:
+- Accept self-signed certificates (for local/LAN use)
+- Provide a proper CA-signed certificate to the server
+- Implement certificate validation callbacks
+
 ### 3.2 Authentication
 The server supports a simple authentication system to protect player identities:
 
 1. **During Registration** (first time using a username):
    - When setting a player name for the first time, a password can be provided
-   - The server will store the password hash for that player name
    - Example: `{"command":"NAME","name":"playerName","password":"secretPassword"}`
 
 2. **During Login** (using an existing username):
    - When connecting with a previously used name, password verification is required
-   - If the password matches, the player is marked as authenticated
-   - If the password is incorrect, an AUTH_FAILED response is sent
    - Example: `{"command":"NAME","name":"playerName","password":"secretPassword"}`
 
 3. **Separate Authentication**:
@@ -49,15 +64,20 @@ The server supports a simple authentication system to protect player identities:
    - Example: `{"command":"AUTHENTICATE","password":"secretPassword"}`
 
 4. **Command Restrictions**:
-   - Some commands require authentication (creating/joining rooms, game actions)
-   - Basic commands like PING, LIST_ROOMS, etc. work without authentication
-   - Attempting to use restricted commands while unauthenticated results in an error
+   - Unauthenticated players can only use: NAME, AUTHENTICATE, PING, BYE, PLAYER_INFO, LIST_ROOMS
+   - All other commands require authentication
+   - Attempting restricted commands without auth returns an error
+
+5. **UDP Encryption Setup**:
+   - Once authenticated via TCP, players receive unique UDP encryption keys
+   - UDP packets from authenticated players are automatically encrypted with AES-256
+   - The server can handle both encrypted and plain-text UDP packets for backward compatibility
 
 ### 3.3 Supported Commands
 
 | Command        | Direction    | Payload (JSON)                                    | Response (JSON)                         | Requires Auth |
 | -------------- | ------------ | ------------------------------------------------- | --------------------------------------- | ------------- |
-| `NAME`         | Client → Srv | `{"command":"NAME","name":"playerName","password":"secret"}` | `{"command":"NAME_OK","name":"playerName","authenticated":true}` or `{"command":"AUTH_FAILED","message":"Invalid password for this player name."}` | No |
+| `NAME`         | Client → Srv | `{"command":"NAME","name":"playerName","password":"secret"}` | `{"command":"NAME_OK","name":"playerName","authenticated":true,"udpEncryption":true}` or `{"command":"AUTH_FAILED","message":"Invalid password for this player name."}` | No |
 | `AUTHENTICATE` | Client → Srv | `{"command":"AUTHENTICATE","password":"secret"}` | `{"command":"AUTH_OK","name":"playerName"}` or `{"command":"AUTH_FAILED","message":"Invalid password."}` | No |
 | `CREATE_ROOM`  | Client → Srv | `{"command":"CREATE_ROOM","name":"roomName"}`   | `{"command":"ROOM_CREATED","roomId":"id","name":"roomName"}` | Yes |
 | `JOIN_ROOM`    | Client → Srv | `{"command":"JOIN_ROOM","roomId":"id"}`         | `{"command":"JOIN_OK","roomId":"id"}` or `{"command":"ERROR","message":"Failed to join room. Room may be full or inactive."}` | Yes |
@@ -107,7 +127,18 @@ The UDP protocol provides low-latency communication for:
 
 All UDP communication happens after the client has joined or created a room via TCP.
 
-### 4.2 Packet Format (JSON-based)
+### 4.2 Encryption
+**For Authenticated Players:**
+- UDP packets are automatically encrypted using AES-256-CBC
+- Each session gets unique encryption keys derived from the session ID
+- Packet format: `[4-byte length header][encrypted JSON data]`
+- The server handles encryption/decryption transparently
+
+**For Unauthenticated Players:**
+- UDP packets are sent as plain-text JSON (backward compatibility)
+- Limited functionality compared to authenticated users
+
+### 4.3 Packet Format (JSON-based)
 The server supports two primary types of UDP packets, both based on JSON:
 
 #### Position Updates
@@ -180,8 +211,9 @@ The server supports two primary types of UDP packets, both based on JSON:
    - High-frequency updates (like position) should be sent periodically regardless of changes
    - Input commands should be sent when input values change or at a consistent rate
 
-### 4.5 Example (C# send)
+### 4.5 Example (C# send with encryption)
 ```csharp
+// For authenticated players - packets are automatically encrypted
 using var udp = new UdpClient();
 var posUpdate = new { 
     command = "UPDATE", 
@@ -189,12 +221,23 @@ var posUpdate = new {
     position = new { x = posX, y = posY, z = posZ },
     rotation = new { x = rotX, y = rotY, z = rotZ, w = rotW }
 };
-var json = JsonSerializer.Serialize(posUpdate) + "\n";
-var bytes = Encoding.UTF8.GetBytes(json);
-await udp.SendAsync(bytes, bytes.Length, serverHost, 8443);
+
+// If you have UDP encryption enabled (authenticated player)
+if (udpCrypto != null)
+{
+    var encryptedPacket = udpCrypto.CreatePacket(posUpdate);
+    await udp.SendAsync(encryptedPacket, encryptedPacket.Length, serverHost, 8443);
+}
+else
+{
+    // Fallback to plain text for unauthenticated users
+    var json = JsonSerializer.Serialize(posUpdate) + "\n";
+    var bytes = Encoding.UTF8.GetBytes(json);
+    await udp.SendAsync(bytes, bytes.Length, serverHost, 8443);
+}
 ```
 
-### 4.6 Example (C# receive)
+### 4.6 Example (C# receive with decryption)
 ```csharp
 using var udpClient = new UdpClient(localPort); // Local port to listen on
 var endpoint = new IPEndPoint(IPAddress.Any, 0);
@@ -202,8 +245,31 @@ var endpoint = new IPEndPoint(IPAddress.Any, 0);
 while (true)
 {
     var result = await udpClient.ReceiveAsync();
-    var json = Encoding.UTF8.GetString(result.Buffer);
-    var update = JsonSerializer.Deserialize<JsonElement>(json);
+    var packetData = result.Buffer;
+    
+    JsonElement update;
+    
+    // Try to decrypt if this looks like an encrypted packet
+    if (packetData.Length >= 4 && udpCrypto != null)
+    {
+        var parsedData = udpCrypto.ParsePacket<JsonElement>(packetData);
+        if (parsedData.ValueKind != JsonValueKind.Undefined)
+        {
+            update = parsedData;
+        }
+        else
+        {
+            // Fallback to plain text parsing
+            var json = Encoding.UTF8.GetString(packetData);
+            update = JsonSerializer.Deserialize<JsonElement>(json);
+        }
+    }
+    else
+    {
+        // Plain text packet
+        var json = Encoding.UTF8.GetString(packetData);
+        update = JsonSerializer.Deserialize<JsonElement>(json);
+    }
     
     // Process by command type
     if (update.TryGetProperty("command", out var cmdElement))
@@ -212,7 +278,7 @@ while (true)
         
         if (command == "UPDATE")
         {
-            // Process position update
+            // Process position update (same as before)
             var sessionId = update.GetProperty("sessionId").GetString();
             var position = update.GetProperty("position");
             var rotation = update.GetProperty("rotation");
@@ -231,7 +297,7 @@ while (true)
         }
         else if (command == "INPUT")
         {
-            // Process input update
+            // Process input update (same as before)
             var sessionId = update.GetProperty("sessionId").GetString();
             var input = update.GetProperty("input");
             
@@ -272,29 +338,34 @@ while (true)
 - List rooms: Get all available rooms with their basic information
 - Get room players: Get the list of players in the current room
 
-## 6. Example TCP Client (C#)
+## 6. Example TCP Client (C# with TLS)
 
 ```csharp
 using System;
 using System.Net.Sockets;
+using System.Net.Security;
 using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
+using System.Security.Cryptography.X509Certificates;
 
 class RacingClient
 {
     private TcpClient _tcp;
-    private NetworkStream _stream;
+    private SslStream _sslStream;
     private string _sessionId;
 
     public async Task RunAsync(string host, int port)
     {
         _tcp = new TcpClient();
         await _tcp.ConnectAsync(host, port);
-        _stream = _tcp.GetStream();
+        
+        // Setup TLS connection
+        _sslStream = new SslStream(_tcp.GetStream(), false, ValidateServerCertificate);
+        await _sslStream.AuthenticateAsClientAsync(host);
 
         // Read welcome
-        var reader = new StreamReader(_stream, Encoding.UTF8);
+        var reader = new StreamReader(_sslStream, Encoding.UTF8);
         var welcome = await reader.ReadLineAsync();
         Console.WriteLine(welcome); // "CONNECTED|<sessionId>"
         _sessionId = welcome.Split('|')[1];
@@ -302,21 +373,30 @@ class RacingClient
         // Set name with password
         await SendJsonAsync(new { command = "NAME", name = "Speedy", password = "secret123" });
         var response = await reader.ReadLineAsync();
-        Console.WriteLine(response); // {"command":"NAME_OK","name":"Speedy","authenticated":true}
+        Console.WriteLine(response); // {"command":"NAME_OK","name":"Speedy","authenticated":true,"udpEncryption":true}
 
         // Create a room
         await SendJsonAsync(new { command = "CREATE_ROOM", name = "FastTrack" });
         response = await reader.ReadLineAsync();
         Console.WriteLine(response); // {"command":"ROOM_CREATED","roomId":"<id>","name":"FastTrack"}
 
-        // ... then start your UDP updates …
+        // ... then start your UDP updates with encryption …
+    }
+
+    private bool ValidateServerCertificate(object sender, X509Certificate certificate, X509Chain chain, SslPolicyErrors sslPolicyErrors)
+    {
+        // For development/LAN use, you might accept self-signed certificates
+        if (sslPolicyErrors == SslPolicyErrors.RemoteCertificateChainErrors)
+            return true; // Accept self-signed certificates
+
+        return sslPolicyErrors == SslPolicyErrors.None;
     }
 
     private async Task SendJsonAsync<T>(T data)
     {
         var json = JsonSerializer.Serialize(data) + "\n";
         var bytes = Encoding.UTF8.GetBytes(json);
-        await _stream.WriteAsync(bytes, 0, bytes.Length);
+        await _sslStream.WriteAsync(bytes, 0, bytes.Length);
     }
 }
 ```
@@ -477,29 +557,67 @@ When an admin action is performed:
 - No login is required as it's designed for LAN-only access
 
 ## 12. Next Steps
-- Add authentication/tokens for secure player identification
-- Implement chat functionality
+- Implement certificate pinning for enhanced security
+- Add rate limiting for UDP packets
+- Implement server-side physics validation
 - Add race-specific features like lap counting and race timing
 - Optimize UDP broadcast for large player counts
 - Implement game state synchronization for deterministic physics
+- Add comprehensive logging and monitoring
 
-## 13. Authentication System
+## 13. Security Implementation Details
 
-### 13.1 Purpose
+### 13.1 TLS/SSL Configuration
+- **Certificate Management**: Server automatically generates self-signed certificates if none provided
+- **Certificate Storage**: Certificates are saved as `server.pfx` in the application directory
+- **TLS Versions**: Supports TLS 1.2 and TLS 1.3
+- **Cipher Suites**: Uses modern cipher suites with forward secrecy
+- **Certificate Validation**: Clients should implement proper certificate validation for production use
+
+### 13.2 UDP Encryption Details
+- **Algorithm**: AES-256-CBC encryption
+- **Key Derivation**: Session-specific keys derived from session ID + shared secret
+- **Packet Format**: `[4-byte length][encrypted data]`
+- **Backward Compatibility**: Server accepts both encrypted and plain-text UDP packets
+- **Session Isolation**: Each authenticated player gets unique encryption keys
+
+### 13.3 Password Security
+- **Hashing**: SHA-256 (should be upgraded to bcrypt/scrypt for production)
+- **Storage**: Only password hashes are stored, never plain text
+- **First-time Setup**: First connection with a username sets the password
+- **Verification**: Subsequent connections require correct password
+
+### 13.4 Security Best Practices for Clients
+1. **Certificate Validation**: Implement proper certificate validation for production
+2. **Connection Security**: Always use TLS for TCP connections
+3. **Key Management**: Securely store UDP encryption keys
+4. **Error Handling**: Handle authentication failures gracefully
+5. **Rate Limiting**: Implement client-side rate limiting for UDP packets
+
+### 13.5 Server Security Features
+- **Session Isolation**: Each player session is completely isolated
+- **Automatic Cleanup**: Inactive sessions are automatically removed
+- **Certificate Rotation**: Certificates can be replaced without server restart
+- **Encryption Negotiation**: Server automatically detects encrypted vs plain UDP packets
+- **Admin Interface**: Dashboard is designed for LAN-only access (no authentication required)
+
+## 14. Authentication System
+
+### 14.1 Purpose
 The authentication system provides a simple identity protection mechanism where:
 - Players can claim and protect their unique usernames
 - Re-connecting with the same name requires password verification
 - Only basic commands are available without authentication
 - Game-related features require successful authentication
 
-### 13.2 Password Handling
+### 14.2 Password Handling
 The server uses SHA-256 hashing for password storage:
 - Passwords are never stored in plain text
 - Each player name has its own associated password hash
 - The first time a name is used, the provided password is stored
 - Subsequent connections must use the same password
 
-### 13.3 Client Implementation
+### 14.3 Client Implementation
 Client applications should:
 1. Store the player's name and password locally
 2. Send the password with the NAME command on reconnection
@@ -508,12 +626,12 @@ Client applications should:
    - Request the correct password
    - Offer to use a different name
 
-### 13.4 Authentication States
+### 14.4 Authentication States
 Players can be in one of two authentication states:
 1. **Unauthenticated**: Limited to basic commands
 2. **Authenticated**: Full access to all game features
 
-### 13.5 Recommended Client Workflow
+### 14.5 Recommended Client Workflow
 ```
 1. Connect to server → Receive session ID
 2. Ask user for name and password

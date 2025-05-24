@@ -4,6 +4,8 @@ using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Sockets;
 using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
+using System.Net.Security;
 using System.Text;
 using System.Text.Json;
 using System.Threading;
@@ -30,6 +32,10 @@ public sealed class RacingServer : IHostedService, IDisposable
     // Player authentication storage
     private readonly ConcurrentDictionary<string, string> _playerPasswordHashes = new();
     
+    // TLS/SSL Configuration
+    private readonly bool _useTls;
+    private readonly X509Certificate2? _serverCertificate;
+    
     // Threading
     private Task? _tcpAcceptTask;
     private Task? _udpReceiveTask;
@@ -38,11 +44,21 @@ public sealed class RacingServer : IHostedService, IDisposable
     // Server info
     public DateTime StartTime { get; private set; }
     
-    public RacingServer(int tcpPort, int udpPort, ILogger<RacingServer>? logger = null)
+    public RacingServer(int tcpPort, int udpPort, ILogger<RacingServer>? logger = null, bool useTls = true, X509Certificate2? certificate = null)
     {
         _tcpPort = tcpPort;
         _udpPort = udpPort;
         _logger = logger ?? LoggerFactory.Create(b => b.AddConsole()).CreateLogger<RacingServer>();
+        _useTls = useTls;
+        _serverCertificate = certificate ?? GenerateOrLoadCertificate();
+        
+        if (_useTls && _serverCertificate == null)
+        {
+            _logger.LogWarning("⚠️ TLS enabled but no certificate available. Falling back to plain text.");
+            _useTls = false;
+        }
+        
+        _logger.LogInformation("🔒 Server initialized with {Security} mode", _useTls ? "TLS/SSL" : "Plain text");
     }
 
     public async Task StartAsync(CancellationToken cancellationToken = default)
@@ -124,13 +140,13 @@ public sealed class RacingServer : IHostedService, IDisposable
         var endpoint = socket.RemoteEndPoint as IPEndPoint;
         
         using (socket)
-        using (var session = new PlayerSession(socket, this))
+        using (var session = new PlayerSession(socket, this, _useTls, _serverCertificate))
         {
             try
             {
                 _sessions.TryAdd(session.Id, session);
-                _logger.LogInformation("👤 Player session {SessionId} created from {ClientIP}:{ClientPort}", 
-                    session.Id, endpoint?.Address, endpoint?.Port);
+                _logger.LogInformation("👤 Player session {SessionId} created from {ClientIP}:{ClientPort} ({Security})", 
+                    session.Id, endpoint?.Address, endpoint?.Port, _useTls ? "TLS" : "Plain");
                     
                 await session.ProcessMessagesAsync(ct).ConfigureAwait(false);
             }
@@ -525,5 +541,62 @@ public sealed class RacingServer : IHostedService, IDisposable
     {
         return _sessions.Values.FirstOrDefault(s => 
             s.PlayerName.Equals(playerName, StringComparison.OrdinalIgnoreCase));
+    }
+    
+    // Certificate Management Methods
+    private X509Certificate2? GenerateOrLoadCertificate()
+    {
+        try
+        {
+            string certPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "server.pfx");
+            string certPassword = "RacingServer2024!";
+            
+            // Try to load existing certificate
+            if (File.Exists(certPath))
+            {
+                _logger.LogInformation("🔐 Loading existing certificate from {CertPath}", certPath);
+                return new X509Certificate2(certPath, certPassword);
+            }
+            
+            // Generate new self-signed certificate
+            _logger.LogInformation("🔐 Generating new self-signed certificate...");
+            var cert = GenerateSelfSignedCertificate("MP-Racing-Server", certPassword);
+            
+            // Save certificate to disk
+            File.WriteAllBytes(certPath, cert.Export(X509ContentType.Pfx, certPassword));
+            _logger.LogInformation("🔐 Certificate saved to {CertPath}", certPath);
+            
+            return cert;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "❌ Failed to generate or load certificate");
+            return null;
+        }
+    }
+    
+    private X509Certificate2 GenerateSelfSignedCertificate(string subjectName, string password)
+    {
+        using var rsa = RSA.Create(2048);
+        var request = new CertificateRequest($"CN={subjectName}", rsa, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+        
+        // Add extensions for server authentication
+        request.Extensions.Add(new X509KeyUsageExtension(X509KeyUsageFlags.DigitalSignature | X509KeyUsageFlags.KeyEncipherment, false));
+        request.Extensions.Add(new X509EnhancedKeyUsageExtension(new OidCollection { new Oid("1.3.6.1.5.5.7.3.1") }, false)); // Server Authentication
+        
+        // Add Subject Alternative Names
+        var sanBuilder = new SubjectAlternativeNameBuilder();
+        sanBuilder.AddDnsName("localhost");
+        sanBuilder.AddDnsName("127.0.0.1");
+        sanBuilder.AddIpAddress(IPAddress.Loopback);
+        sanBuilder.AddIpAddress(IPAddress.IPv6Loopback);
+        request.Extensions.Add(sanBuilder.Build());
+        
+        // Create certificate valid for 1 year
+        var certificate = request.CreateSelfSigned(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddYears(1));
+        
+        // Export and re-import to ensure private key is properly associated
+        var pfxBytes = certificate.Export(X509ContentType.Pfx, password);
+        return new X509Certificate2(pfxBytes, password, X509KeyStorageFlags.Exportable);
     }
 }
