@@ -2,11 +2,11 @@
 
 ## 1. Overview
 MP-Server is a secure TCP/UDP racing‐game server with TLS/SSL encryption.  
-Clients connect over TLS-encrypted TCP (for commands, room management, chat) and send/receive encrypted UDP packets (for real‐time position updates).
+Clients connect over TLS-encrypted TCP (for commands, room management, chat) and send/receive encrypted UDP     await udp.SendAsync(bytes, bytes.Length, serverHost, 443);ackets (for real‐time position updates).
 
 Ports (defaults):
-- TCP: 8443 (TLS/SSL encrypted)
-- UDP: 8443 (AES encrypted for authenticated users)
+- TCP: 443 (TLS/SSL encrypted) - Uses standard HTTPS port for firewall traversal
+- UDP: 443 (AES encrypted for authenticated users) - Same port as TCP 
 - Dashboard Web UI: 8080
 
 ## 1.1 Security Features
@@ -30,7 +30,7 @@ Ports (defaults):
 1. Client opens a **TLS-encrypted** TCP connection to server:  
    ```csharp
    var client = new TcpClient();
-   await client.ConnectAsync("server.address", 8443);
+   await client.ConnectAsync("server.address", 443);
    var sslStream = new SslStream(client.GetStream());
    await sslStream.AuthenticateAsClientAsync("server.address");
    ```
@@ -226,7 +226,7 @@ var posUpdate = new {
 if (udpCrypto != null)
 {
     var encryptedPacket = udpCrypto.CreatePacket(posUpdate);
-    await udp.SendAsync(encryptedPacket, encryptedPacket.Length, serverHost, 8443);
+    await udp.SendAsync(encryptedPacket, encryptedPacket.Length, serverHost, 443);
 }
 else
 {

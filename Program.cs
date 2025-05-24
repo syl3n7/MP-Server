@@ -21,7 +21,7 @@ builder.Logging.AddConsole();
 builder.Services.AddSingleton<RacingServer>(serviceProvider => 
 {
     var logger = serviceProvider.GetRequiredService<ILogger<RacingServer>>();
-    return new RacingServer(8443, 8443, logger, useTls: true);
+    return new RacingServer(443, 443, logger, useTls: true);
 });
 
 // Build the web application
