@@ -49,14 +49,20 @@ public sealed class GameRoom
         if (_players.Count >= MaxPlayers)
             return false;
             
-        // Assign next available garage position
-        int positionIndex = _players.Count;
-        if (positionIndex < _trackGaragePositions.Length)
+        // First try to add the player to prevent race conditions
+        if (_players.TryAdd(player.Id, player))
         {
-            _playerPositions.TryAdd(player.Id, positionIndex);
+            // Player was successfully added, now assign spawn position
+            // Use _players.Count - 1 because the player is now in the collection
+            int positionIndex = _players.Count - 1;
+            if (positionIndex >= 0 && positionIndex < _trackGaragePositions.Length)
+            {
+                _playerPositions.TryAdd(player.Id, positionIndex);
+            }
+            return true;
         }
-            
-        return _players.TryAdd(player.Id, player);
+        
+        return false;
     }
     
     public bool TryRemovePlayer(string playerId)
@@ -87,13 +93,5 @@ public sealed class GameRoom
     public void StartGame()
     {
         IsActive = true;
-    }
-
-    public bool TryJoinRoom(string playerId, PlayerInfo player)
-    {
-        if (IsActive || _players.Count >= MaxPlayers || _players.ContainsKey(playerId))
-            return false;
-
-        return _players.TryAdd(playerId, player);
     }
 }
