@@ -211,12 +211,58 @@ public sealed class RacingServer : IHostedService, IDisposable
     {
         try
         {
-            string message = Encoding.UTF8.GetString(data.Span).TrimEnd('\n');
-            _logger.LogDebug("🔍 Processing UDP packet from {RemoteEndPoint}: {Message}", remoteEndPoint, message);
+            JsonElement root = default;
+            PlayerSession? senderSession = null;
+            bool parseSuccessful = false;
             
-            // Parse the JSON message
-            using JsonDocument document = JsonDocument.Parse(message);
-            JsonElement root = document.RootElement;
+            // Check if this looks like an encrypted packet (has 4-byte length header)
+            if (data.Length >= 4)
+            {
+                // Try to find the session by examining UDP endpoints of existing sessions
+                foreach (var session in _sessions.Values)
+                {
+                    if (session?.IsAuthenticated == true && session.UdpCrypto != null)
+                    {
+                        // Try to decrypt and parse the packet with this session's crypto
+                        try
+                        {
+                            var decryptedData = session.UdpCrypto.ParsePacket<JsonElement>(data.ToArray());
+                            if (decryptedData.ValueKind != JsonValueKind.Undefined)
+                            {
+                                root = decryptedData;
+                                senderSession = session;
+                                parseSuccessful = true;
+                                _logger.LogDebug("🔓 Successfully decrypted UDP packet from {RemoteEndPoint} for session {SessionId}", 
+                                    remoteEndPoint, session.Id);
+                                break;
+                            }
+                        }
+                        catch
+                        {
+                            // Not encrypted with this session's key, continue
+                        }
+                    }
+                }
+            }
+            
+            // If decryption failed or this is a plain-text packet, try parsing as plain JSON
+            if (!parseSuccessful)
+            {
+                string message = Encoding.UTF8.GetString(data.Span).TrimEnd('\n');
+                _logger.LogDebug("🔍 Processing plain UDP packet from {RemoteEndPoint}: {Message}", remoteEndPoint, message);
+                
+                // Parse the JSON message
+                using JsonDocument document = JsonDocument.Parse(message);
+                root = document.RootElement;
+                parseSuccessful = true;
+            }
+            
+            // Only proceed if we successfully parsed the packet
+            if (!parseSuccessful)
+            {
+                _logger.LogWarning("⚠️ Failed to parse UDP packet from {RemoteEndPoint}", remoteEndPoint);
+                return;
+            }
             
             // Check if this is an UPDATE command
             if (root.TryGetProperty("command", out JsonElement commandElement))
@@ -272,12 +318,12 @@ public sealed class RacingServer : IHostedService, IDisposable
                 }
                 else
                 {
-                    _logger.LogWarning("⚠️ Received malformed UDP packet: {Message}", message);
+                    _logger.LogWarning("⚠️ Received malformed UDP packet from {RemoteEndPoint}", remoteEndPoint);
                 }
             }
             else
             {
-                _logger.LogWarning("⚠️ Received malformed UDP packet: {Message}", message);
+                _logger.LogWarning("⚠️ Received malformed UDP packet from {RemoteEndPoint}", remoteEndPoint);
             }
         }
         catch (JsonException ex)
