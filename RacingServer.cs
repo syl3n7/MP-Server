@@ -16,6 +16,7 @@ using System.Numerics;
 using System.Linq;
 using System.IO;
 using MP.Server;
+using MP.Server.Diagnostics;
 
 public sealed class RacingServer : IHostedService, IDisposable
 {
@@ -68,6 +69,11 @@ public sealed class RacingServer : IHostedService, IDisposable
         // Set the start time
         StartTime = DateTime.UtcNow;
         
+        // Print diagnostic information
+        _logger.LogInformation("🚀 Starting Racing Server...");
+        MP.Server.Diagnostics.NetworkDiagnostics.PrintNetworkInfo(_logger);
+        MP.Server.Diagnostics.NetworkDiagnostics.PrintCertificateInfo(_serverCertificate, _logger);
+        
         // TCP Listener
         _tcpListener = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
         _tcpListener.Bind(new IPEndPoint(IPAddress.Any, _tcpPort));
@@ -83,6 +89,9 @@ public sealed class RacingServer : IHostedService, IDisposable
         _heartbeatTask = Task.Run(() => HeartbeatMonitorAsync(_cts.Token));
         
         _logger.LogInformation("✅ Server started on TCP:{TcpPort} UDP:{UdpPort}", _tcpPort, _udpPort);
+        _logger.LogInformation("🔗 Server binding: 0.0.0.0:{Port} ({Security})", _tcpPort, _useTls ? "TLS/SSL" : "Plain");
+        _logger.LogInformation("📡 Clients should connect to: {PublicIP}:{Port}", "89.114.116.19", _tcpPort);
+        
         await Task.CompletedTask; // Add await to make this truly async
     }
 
