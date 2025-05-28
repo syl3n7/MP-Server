@@ -27,10 +27,10 @@ namespace MP.Server
         public static X509Certificate2 LoadPkcs12(byte[] certificateBytes, string password)
         {
             X509KeyStorageFlags flags = GetPlatformSpecificFlags();
+#pragma warning disable SYSLIB0057 // Suppressing obsolete warning for X509Certificate2 constructor
             return new X509Certificate2(certificateBytes, password, flags);
-        }
-
-        /// <summary>
+#pragma warning restore SYSLIB0057
+        }        /// <summary>
         /// Gets platform-specific certificate storage flags
         /// Windows and Linux/macOS handle certificates differently
         /// </summary>
@@ -45,13 +45,17 @@ namespace MP.Server
                 flags |= X509KeyStorageFlags.MachineKeySet;
                 flags |= X509KeyStorageFlags.PersistKeySet;
             }
-            else if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux) || 
-                     RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
+            else if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
             {
-                // On Unix systems, the ephemeral key set is more reliable
+                // On Linux, the ephemeral key set is more reliable
                 flags |= X509KeyStorageFlags.EphemeralKeySet;
             }
-
+            else if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
+            {
+                // On macOS, use persistent key set instead of ephemeral
+                flags |= X509KeyStorageFlags.PersistKeySet;
+            }
+            
             return flags;
         }
     }

@@ -3,6 +3,9 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Collections.Generic;
 using System.Linq;
+using Microsoft.Extensions.Logging;
+using MP.Server.Testing;
+using MP.Server.Diagnostics;
 
 public class ConsoleUI
 {
@@ -53,6 +56,18 @@ public class ConsoleUI
                     ShowDashboardInfo();
                     break;
                     
+                case "test-wan":
+                    await TestWanConnectivity();
+                    break;
+                    
+                case "test-lan":
+                    await TestLanConnectivity();
+                    break;
+                    
+                case "network-info":
+                    ShowNetworkInfo();
+                    break;
+                    
                 case "quit":
                 case "exit":
                     Console.WriteLine("Shutting down server...");
@@ -69,12 +84,15 @@ public class ConsoleUI
     private void PrintHelp()
     {
         Console.WriteLine("Available commands:");
-        Console.WriteLine("  help      - Show this help message");
-        Console.WriteLine("  rooms     - List all game rooms");
-        Console.WriteLine("  sessions  - List all active player sessions");
-        Console.WriteLine("  stats     - Show server statistics");
-        Console.WriteLine("  dashboard - Show web dashboard information");
-        Console.WriteLine("  quit      - Shut down the server");
+        Console.WriteLine("  help        - Show this help message");
+        Console.WriteLine("  rooms       - List all game rooms");
+        Console.WriteLine("  sessions    - List all active player sessions");
+        Console.WriteLine("  stats       - Show server statistics");
+        Console.WriteLine("  dashboard   - Show web dashboard information");
+        Console.WriteLine("  test-wan    - Test WAN connectivity (89.114.116.19:443)");
+        Console.WriteLine("  test-lan    - Test LAN connectivity (192.168.3.123:443)");
+        Console.WriteLine("  network-info- Show network interface information");
+        Console.WriteLine("  quit        - Shut down the server");
     }
 
     private void ListRooms()
@@ -172,5 +190,55 @@ public class ConsoleUI
             return string.Empty;
             
         return str.Length <= maxLength ? str : str.Substring(0, maxLength - 3) + "...";
+    }
+
+    private async Task TestWanConnectivity()
+    {
+        Console.WriteLine("🧪 Testing WAN connectivity...");
+        
+        var logger = Microsoft.Extensions.Logging.LoggerFactory.Create(b => b.AddConsole()).CreateLogger<ConnectionTester>();
+        var tester = new ConnectionTester(logger);
+        
+        var result = await tester.TestWanConnectivity();
+        
+        if (result)
+        {
+            Console.WriteLine("✅ WAN connectivity test PASSED");
+        }
+        else
+        {
+            Console.WriteLine("❌ WAN connectivity test FAILED");
+            Console.WriteLine("Possible issues:");
+            Console.WriteLine("  • NAT port forwarding not configured correctly");
+            Console.WriteLine("  • Firewall blocking port 443");
+            Console.WriteLine("  • ISP blocking port 443");
+            Console.WriteLine("  • Server not bound to correct interface");
+        }
+    }
+    
+    private async Task TestLanConnectivity()
+    {
+        Console.WriteLine("🧪 Testing LAN connectivity...");
+        
+        var logger = Microsoft.Extensions.Logging.LoggerFactory.Create(b => b.AddConsole()).CreateLogger<ConnectionTester>();
+        var tester = new ConnectionTester(logger);
+        
+        var result = await tester.TestLanConnectivity();
+        
+        if (result)
+        {
+            Console.WriteLine("✅ LAN connectivity test PASSED");
+        }
+        else
+        {
+            Console.WriteLine("❌ LAN connectivity test FAILED - Check local firewall");
+        }
+    }
+    
+    private void ShowNetworkInfo()
+    {
+        Console.WriteLine("🌐 Network Information:");
+        var logger = Microsoft.Extensions.Logging.LoggerFactory.Create(b => b.AddConsole()).CreateLogger<ConsoleUI>();
+        NetworkDiagnostics.PrintNetworkInfo(logger);
     }
 }
