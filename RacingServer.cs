@@ -17,6 +17,7 @@ using System.Linq;
 using System.IO;
 using MP.Server;
 using MP.Server.Diagnostics;
+using MP.Server.Security;
 
 public sealed class RacingServer : IHostedService, IDisposable
 {
@@ -25,6 +26,10 @@ public sealed class RacingServer : IHostedService, IDisposable
     private readonly ILogger<RacingServer> _logger;
     internal ILogger<RacingServer> Logger => _logger;
     private readonly CancellationTokenSource _cts = new();
+    
+    // Security system
+    private readonly SecurityManager _securityManager;
+    private readonly SecurityConfig _securityConfig;
     
     // Networking
     private Socket? _tcpListener;
@@ -47,13 +52,20 @@ public sealed class RacingServer : IHostedService, IDisposable
     // Server info
     public DateTime StartTime { get; private set; }
     
-    public RacingServer(int tcpPort, int udpPort, ILogger<RacingServer>? logger = null, bool useTls = true, X509Certificate2? certificate = null)
+    // Security system access
+    public SecurityManager SecurityManager => _securityManager;
+    
+    public RacingServer(int tcpPort, int udpPort, ILogger<RacingServer>? logger = null, bool useTls = true, X509Certificate2? certificate = null, SecurityConfig? securityConfig = null)
     {
         _tcpPort = tcpPort;
         _udpPort = udpPort;
         _logger = logger ?? LoggerFactory.Create(b => b.AddConsole()).CreateLogger<RacingServer>();
         _useTls = useTls;
         _serverCertificate = certificate ?? GenerateOrLoadCertificate();
+        
+        // Initialize security system
+        _securityConfig = securityConfig ?? new SecurityConfig();
+        _securityManager = new SecurityManager(_securityConfig, _logger);
         
         if (_useTls && _serverCertificate == null)
         {
@@ -62,6 +74,7 @@ public sealed class RacingServer : IHostedService, IDisposable
         }
         
         _logger.LogInformation("🔒 Server initialized with {Security} mode", _useTls ? "TLS/SSL" : "Plain text");
+        _logger.LogInformation("🛡️ Security system initialized with comprehensive protection");
     }
 
     public async Task StartAsync(CancellationToken cancellationToken = default)
@@ -111,7 +124,11 @@ public sealed class RacingServer : IHostedService, IDisposable
         _logger.LogInformation("🛑 Server stopped");
     }
 
-    public void Dispose() => _cts.Dispose();
+    public void Dispose() 
+    {
+        _securityManager?.Dispose();
+        _cts.Dispose();
+    }
 
     private async Task AcceptTcpConnectionsAsync(CancellationToken ct)
     {
@@ -168,6 +185,7 @@ public sealed class RacingServer : IHostedService, IDisposable
             finally
             {
                 _sessions.TryRemove(session.Id, out _);
+                _securityManager.RemoveClient(session.Id);
                 await session.DisconnectAsync().ConfigureAwait(false);
                 _logger.LogInformation("👋 Player session {SessionId} disconnected", session.Id);
             }
@@ -273,14 +291,30 @@ public sealed class RacingServer : IHostedService, IDisposable
                 return;
             }
             
+            // 🛡️ SECURITY VALIDATION - Validate packet before processing
+            string clientId = "unknown";
+            if (root.TryGetProperty("sessionId", out JsonElement sessionIdElement))
+            {
+                clientId = sessionIdElement.GetString() ?? "unknown";
+            }
+            
+            // Validate the packet using security manager
+            var validationResult = _securityManager.ValidateUdpPacket(clientId, data.ToArray(), DateTime.UtcNow);
+            if (!validationResult.IsValid)
+            {
+                _logger.LogWarning("🚫 Security validation failed for UDP packet from {RemoteEndPoint}: {Reason}", 
+                    remoteEndPoint, validationResult.Reason);
+                return; // Reject the packet
+            }
+            
             // Check if this is an UPDATE command
             if (root.TryGetProperty("command", out JsonElement commandElement))
             {
                 string? commandType = commandElement.GetString();
                 
-                if (commandType == "UPDATE" && root.TryGetProperty("sessionId", out JsonElement sessionIdElement))
+                if (commandType == "UPDATE" && root.TryGetProperty("sessionId", out JsonElement updateSessionIdElement))
                 {
-                    string? sessionId = sessionIdElement.GetString();
+                    string? sessionId = updateSessionIdElement.GetString();
                     
                     if (string.IsNullOrEmpty(sessionId))
                     {

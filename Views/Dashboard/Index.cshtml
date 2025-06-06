@@ -82,6 +82,54 @@
         .btn-danger {
             margin-right: 5px;
         }
+        .security-section {
+            background-color: #fff3cd;
+            border: 1px solid #ffeaa7;
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 20px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+        }
+        .security-title {
+            font-weight: bold;
+            margin-bottom: 15px;
+            color: #856404;
+        }
+        .threat-level-0 { color: #28a745; }
+        .threat-level-1 { color: #ffc107; }
+        .threat-level-2 { color: #fd7e14; }
+        .threat-level-3 { color: #dc3545; }
+        .security-metric {
+            display: inline-block;
+            margin-right: 15px;
+            padding: 5px 10px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: bold;
+        }
+        .security-metric.low { background-color: #d4edda; color: #155724; }
+        .security-metric.medium { background-color: #fff3cd; color: #856404; }
+        .security-metric.high { background-color: #f8d7da; color: #721c24; }
+        .security-tab {
+            display: none;
+        }
+        .security-tab.active {
+            display: block;
+        }
+        .nav-tabs .nav-link.active {
+            background-color: #fff3cd;
+            border-color: #ffeaa7;
+            color: #856404;
+        }
+        .event-timestamp {
+            font-size: 11px;
+            color: #6c757d;
+        }
+        .severity-1 { color: #6c757d; }
+        .severity-2 { color: #17a2b8; }
+        .severity-3 { color: #ffc107; }
+        .severity-4 { color: #fd7e14; }
+        .severity-5 { color: #dc3545; }
     </style>
 </head>
 <body>
@@ -118,6 +166,128 @@
                 <h5>Selected Item Actions:</h5>
                 <div class="admin-buttons" id="itemActionButtons">
                     <!-- Action buttons will be added here dynamically -->
+                </div>
+            </div>
+        </div>
+        
+        <div class="security-section">
+            <h2 class="security-title">🛡️ Security Monitoring</h2>
+            
+            <ul class="nav nav-tabs" id="securityTabs" role="tablist">
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link active" id="overview-tab" data-tab="overview" type="button" role="tab">Overview</button>
+                </li>
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link" id="events-tab" data-tab="events" type="button" role="tab">Security Events</button>
+                </li>
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link" id="players-tab" data-tab="players" type="button" role="tab">Player Security</button>
+                </li>
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link" id="ratelimit-tab" data-tab="ratelimit" type="button" role="tab">Rate Limits</button>
+                </li>
+            </ul>
+            
+            <div class="tab-content" id="securityTabContent">
+                <div class="tab-pane fade show active security-tab" id="overview" role="tabpanel">
+                    <div class="row mt-3">
+                        <div class="col-md-3">
+                            <div class="stat-card">
+                                <div class="stat-value" id="totalEvents">0</div>
+                                <div class="stat-label">Total Events</div>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="stat-card">
+                                <div class="stat-value" id="recentEvents">0</div>
+                                <div class="stat-label">Recent Events (5m)</div>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="stat-card">
+                                <div class="stat-value" id="highThreatPlayers">0</div>
+                                <div class="stat-label">High Threat Players</div>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="stat-card">
+                                <div class="stat-value" id="securityStatus">🟢</div>
+                                <div class="stat-label">Security Status</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="mt-3">
+                        <h5>Event Types (Last 100)</h5>
+                        <div id="eventTypesChart">
+                            <!-- Event types breakdown will be displayed here -->
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="tab-pane fade security-tab" id="events" role="tabpanel">
+                    <div class="mt-3">
+                        <div class="table-responsive">
+                            <table class="table table-sm" id="securityEventsTable">
+                                <thead>
+                                    <tr>
+                                        <th>Time</th>
+                                        <th>Type</th>
+                                        <th>Player</th>
+                                        <th>Description</th>
+                                        <th>Severity</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <!-- Security events will be displayed here -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="tab-pane fade security-tab" id="players" role="tabpanel">
+                    <div class="mt-3">
+                        <div class="table-responsive">
+                            <table class="table table-sm" id="playerSecurityTable">
+                                <thead>
+                                    <tr>
+                                        <th>Player</th>
+                                        <th>Threat Level</th>
+                                        <th>Violations</th>
+                                        <th>Recent</th>
+                                        <th>Auth</th>
+                                        <th>Last Activity</th>
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <!-- Player security data will be displayed here -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="tab-pane fade security-tab" id="ratelimit" role="tabpanel">
+                    <div class="mt-3">
+                        <div class="table-responsive">
+                            <table class="table table-sm" id="rateLimitTable">
+                                <thead>
+                                    <tr>
+                                        <th>Player</th>
+                                        <th>TCP Rate</th>
+                                        <th>UDP Rate</th>
+                                        <th>TCP Usage</th>
+                                        <th>UDP Usage</th>
+                                        <th>Last Activity</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <!-- Rate limit data will be displayed here -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -177,6 +347,7 @@
     </div>
     
     <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/js/bootstrap.bundle.min.js"></script>
     <script>
         $(document).ready(function() {
             // Load data on page load
@@ -188,6 +359,19 @@
             // Manual refresh button
             $("#refreshButton").click(function() {
                 loadAllData();
+            });
+
+            // Security tab switching
+            $("#securityTabs button[data-tab]").click(function() {
+                const targetTab = $(this).data("tab");
+                
+                // Update tab appearance
+                $("#securityTabs button").removeClass("active");
+                $(this).addClass("active");
+                
+                // Show/hide tab content
+                $(".security-tab").removeClass("show active");
+                $(`#${targetTab}`).addClass("show active");
             });
 
             // Admin buttons
@@ -213,6 +397,7 @@
                 loadStats();
                 loadRooms();
                 loadSessions();
+                loadSecurityData();
             }
             
             function loadStats() {
@@ -330,6 +515,140 @@
                         
                         const sessionId = $(this).data("id");
                         showItemActions("session", sessionId);
+                    });
+                });
+            }
+            
+            function loadSecurityData() {
+                loadSecurityStats();
+                loadSecurityEvents();
+                loadPlayerSecurity();
+                loadRateLimitData();
+            }
+            
+            function loadSecurityStats() {
+                $.getJSON("/Dashboard/GetSecurityStats", function(data) {
+                    $("#totalEvents").text(data.totalEvents || 0);
+                    $("#recentEvents").text(data.recentEvents || 0);
+                    $("#highThreatPlayers").text(data.highThreatPlayers || 0);
+                    
+                    // Update security status based on recent events and threat levels
+                    let status = "🟢"; // Green
+                    if (data.highThreatPlayers > 0 || data.recentEvents > 5) {
+                        status = "🟡"; // Yellow
+                    }
+                    if (data.highThreatPlayers > 2 || data.recentEvents > 10) {
+                        status = "🔴"; // Red
+                    }
+                    $("#securityStatus").text(status);
+                    
+                    // Update event types chart
+                    let chartHtml = "";
+                    if (data.eventsByType && Object.keys(data.eventsByType).length > 0) {
+                        for (const [eventType, count] of Object.entries(data.eventsByType)) {
+                            chartHtml += `<span class="security-metric medium">${eventType}: ${count}</span>`;
+                        }
+                    } else {
+                        chartHtml = "<span class='text-muted'>No recent events</span>";
+                    }
+                    $("#eventTypesChart").html(chartHtml);
+                });
+            }
+            
+            function loadSecurityEvents() {
+                $.getJSON("/Dashboard/GetSecurityEvents?limit=50", function(data) {
+                    let tbody = $("#securityEventsTable tbody");
+                    tbody.empty();
+                    
+                    if (!data || data.length === 0) {
+                        tbody.append('<tr><td colspan="5" class="text-center">No security events</td></tr>');
+                        return;
+                    }
+                    
+                    data.forEach(function(event) {
+                        let timeAgo = getTimeAgo(new Date(event.timestamp));
+                        let severityClass = `severity-${event.severity}`;
+                        
+                        tbody.append(`<tr>
+                            <td><span class="event-timestamp">${timeAgo}</span></td>
+                            <td><span class="badge bg-secondary">${event.eventType}</span></td>
+                            <td>${escapeHtml(event.clientId.substring(0, 8))}...</td>
+                            <td>${escapeHtml(event.description)}</td>
+                            <td><span class="${severityClass}">●</span> ${event.severity}</td>
+                        </tr>`);
+                    });
+                });
+            }
+            
+            function loadPlayerSecurity() {
+                $.getJSON("/Dashboard/GetPlayerSecurityDetails", function(data) {
+                    let tbody = $("#playerSecurityTable tbody");
+                    tbody.empty();
+                    
+                    if (!data || data.length === 0) {
+                        tbody.append('<tr><td colspan="7" class="text-center">No players online</td></tr>');
+                        return;
+                    }
+                    
+                    data.forEach(function(player) {
+                        let threatClass = `threat-level-${player.threatLevel}`;
+                        let authBadge = player.isAuthenticated 
+                            ? '<span class="badge bg-success">✓</span>' 
+                            : '<span class="badge bg-warning">✗</span>';
+                        let timeAgo = getTimeAgo(new Date(player.lastActivity));
+                        
+                        tbody.append(`<tr>
+                            <td>${escapeHtml(player.name)}</td>
+                            <td><span class="${threatClass}">●</span> ${player.threatLevel}</td>
+                            <td>${player.totalViolations}</td>
+                            <td>${player.recentViolations}</td>
+                            <td>${authBadge}</td>
+                            <td>${timeAgo}</td>
+                            <td>
+                                <button class="btn btn-sm btn-danger banPlayerBtn" data-id="${player.id}" data-name="${escapeHtml(player.name)}">Ban</button>
+                            </td>
+                        </tr>`);
+                    });
+                    
+                    // Add ban player handlers
+                    $(".banPlayerBtn").click(function() {
+                        const playerId = $(this).data("id");
+                        const playerName = $(this).data("name");
+                        const reason = prompt(`Enter ban reason for ${playerName}:`, "Security violation");
+                        
+                        if (reason && confirm(`Are you sure you want to ban ${playerName}?`)) {
+                            $.post("/Dashboard/BanPlayer", { sessionId: playerId, reason: reason }, function(data) {
+                                alert(data.message);
+                                loadAllData();
+                            });
+                        }
+                    });
+                });
+            }
+            
+            function loadRateLimitData() {
+                $.getJSON("/Dashboard/GetRateLimitStatus", function(data) {
+                    let tbody = $("#rateLimitTable tbody");
+                    tbody.empty();
+                    
+                    if (!data || data.length === 0) {
+                        tbody.append('<tr><td colspan="6" class="text-center">No active sessions</td></tr>');
+                        return;
+                    }
+                    
+                    data.forEach(function(player) {
+                        let tcpUsageClass = player.tcpUtilization > 80 ? "high" : player.tcpUtilization > 50 ? "medium" : "low";
+                        let udpUsageClass = player.udpUtilization > 80 ? "high" : player.udpUtilization > 50 ? "medium" : "low";
+                        let timeAgo = getTimeAgo(new Date(player.lastActivity));
+                        
+                        tbody.append(`<tr>
+                            <td>${escapeHtml(player.playerName)}</td>
+                            <td>${player.tcpRate}/${player.tcpLimit}</td>
+                            <td>${player.udpRate}/${player.udpLimit}</td>
+                            <td><span class="security-metric ${tcpUsageClass}">${player.tcpUtilization}%</span></td>
+                            <td><span class="security-metric ${udpUsageClass}">${player.udpUtilization}%</span></td>
+                            <td>${timeAgo}</td>
+                        </tr>`);
                     });
                 });
             }

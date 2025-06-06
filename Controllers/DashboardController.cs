@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Mvc;
 using System.Text.Json;
+using MP.Server.Security;
 
 namespace MP.Server.Controllers
 {
@@ -221,6 +222,144 @@ namespace MP.Server.Controllers
             }
 
             return Json(new { success = true, message = $"Disconnected {sessionCount} players" });
+        }
+
+        // Security Monitoring Endpoints
+
+        [HttpGet]
+        public IActionResult GetSecurityStats()
+        {
+            var sessions = _server.GetAllSessions();
+            var securityEvents = _server.SecurityManager.GetRecentEvents(100);
+            
+            var stats = new
+            {
+                totalEvents = securityEvents.Count,
+                recentEvents = securityEvents.Count(e => e.Timestamp >= DateTime.UtcNow.AddMinutes(-5)),
+                eventsByType = securityEvents.GroupBy(e => e.EventType.ToString())
+                    .ToDictionary(g => g.Key, g => g.Count()),
+                threatLevels = sessions.Select(s => _server.SecurityManager.GetPlayerStats(s.Id))
+                    .GroupBy(stats => stats.ThreatLevel)
+                    .ToDictionary(g => g.Key, g => g.Count()),
+                highThreatPlayers = sessions.Select(s => _server.SecurityManager.GetPlayerStats(s.Id))
+                    .Where(stats => stats.ThreatLevel >= 2)
+                    .Count()
+            };
+
+            return Json(stats);
+        }
+
+        [HttpGet]
+        public IActionResult GetSecurityEvents(int limit = 50)
+        {
+            var events = _server.SecurityManager.GetRecentEvents(limit)
+                .OrderByDescending(e => e.Timestamp)
+                .Select(e => new
+                {
+                    timestamp = e.Timestamp,
+                    eventType = e.EventType.ToString(),
+                    clientId = e.ClientId,
+                    description = e.Description,
+                    severity = e.Severity,
+                    additionalData = e.AdditionalData
+                });
+
+            return Json(events);
+        }
+
+        [HttpGet]
+        public IActionResult GetPlayerSecurityDetails()
+        {
+            var sessions = _server.GetAllSessions();
+            var playerSecurityData = sessions.Select(s =>
+            {
+                var stats = _server.SecurityManager.GetPlayerStats(s.Id);
+                return new
+                {
+                    id = s.Id,
+                    name = s.PlayerName,
+                    currentRoomId = s.CurrentRoomId,
+                    threatLevel = stats.ThreatLevel,
+                    totalViolations = stats.TotalViolations,
+                    recentViolations = stats.RecentViolations,
+                    tcpRate = stats.TcpMessagesPerSecond,
+                    udpRate = stats.UdpPacketsPerSecond,
+                    lastActivity = stats.LastActivity,
+                    isAuthenticated = s.IsAuthenticated
+                };
+            }).OrderByDescending(p => p.threatLevel).ThenByDescending(p => p.recentViolations);
+
+            return Json(playerSecurityData);
+        }
+
+        [HttpPost]
+        public async Task<IActionResult> BanPlayer(string sessionId, string reason = "Security violation")
+        {
+            if (string.IsNullOrEmpty(sessionId))
+            {
+                return Json(new { success = false, message = "Session ID is required" });
+            }
+
+            var player = _server.GetPlayerSession(sessionId);
+            if (player == null)
+            {
+                return Json(new { success = false, message = "Player not found" });
+            }
+
+            // Remove from room if in one
+            if (!string.IsNullOrEmpty(player.CurrentRoomId))
+            {
+                var room = _server.GetAllRooms().FirstOrDefault(r => r.Id == player.CurrentRoomId);
+                if (room != null)
+                {
+                    room.TryRemovePlayer(sessionId);
+                    
+                    // Transfer host if needed
+                    if (room.HostId == sessionId && room.PlayerCount > 0)
+                    {
+                        var newHost = room.Players.FirstOrDefault();
+                        if (newHost != null)
+                        {
+                            room.HostId = newHost.Id;
+                        }
+                    }
+                    
+                    if (room.PlayerCount == 0 && !room.IsActive)
+                    {
+                        _server.RemoveRoom(room.Id);
+                    }
+                }
+            }
+
+            // Send ban message and disconnect
+            await player.SendJsonAsync(new { command = "BANNED", reason = reason });
+            await player.DisconnectAsync();
+
+            return Json(new { success = true, message = $"Player '{player.PlayerName}' has been banned for: {reason}" });
+        }
+
+        [HttpGet]
+        public IActionResult GetRateLimitStatus()
+        {
+            var sessions = _server.GetAllSessions();
+            var rateLimitData = sessions.Select(s =>
+            {
+                var stats = _server.SecurityManager.GetPlayerStats(s.Id);
+                return new
+                {
+                    sessionId = s.Id,
+                    playerName = s.PlayerName,
+                    tcpRate = stats.TcpMessagesPerSecond,
+                    udpRate = stats.UdpPacketsPerSecond,
+                    tcpLimit = 10, // From RateLimiter.Limits.TCP_MESSAGES_PER_SECOND
+                    udpLimit = 60, // From RateLimiter.Limits.UDP_PACKETS_PER_SECOND
+                    tcpUtilization = Math.Round((stats.TcpMessagesPerSecond / 10.0) * 100, 1),
+                    udpUtilization = Math.Round((stats.UdpPacketsPerSecond / 60.0) * 100, 1),
+                    lastActivity = stats.LastActivity
+                };
+            }).OrderByDescending(p => Math.Max(p.tcpUtilization, p.udpUtilization));
+
+            return Json(rateLimitData);
         }
     }
 }
