@@ -1,27 +1,55 @@
 # MP-Server Protocol Documentation
 
 ## 1. Overview
-MP-Server is a secure TCP/UDP racing‐game server with TLS/SSL encryption.  
-Clients connect over TLS-encrypted TCP (for commands, room management, chat) and send/receive encrypted UDP packets (for real‐time position updates).
+MP-Server is a high-performance, secure TCP/UDP multiplayer racing game server with enterprise-grade security features.  
+Clients connect over TLS-encrypted TCP (for commands, room management, chat) and send/receive AES-encrypted UDP packets (for real‐time position updates).
 
-**Recent Updates (Latest):**
+**Latest Updates (June 2025):**
+- ✅ **SECURITY ENHANCED**: Comprehensive packet validation and anti-cheat system
+- ✅ **PERFORMANCE**: Advanced rate limiting and DDoS protection
+- ✅ **MONITORING**: Real-time web dashboard with security analytics
 - ✅ **CRITICAL FIX**: Resolved server-side UDP encryption bug causing JsonReaderException errors
 - ✅ **FIXED**: Race condition in spawn position assignment during game start
 - ✅ **ENHANCED**: Server now properly handles both encrypted and plain UDP packets
 - ✅ **IMPROVED**: Comprehensive error handling for malformed/encrypted UDP data
 
 Ports (defaults):
-- TCP: 443 (TLS/SSL encrypted) - Uses standard HTTPS port for firewall traversal
-- UDP: 443 (AES encrypted for authenticated users) - Same port as TCP 
-- Dashboard Web UI: 8080
+- **TCP: 443** (TLS/SSL encrypted) - Uses standard HTTPS port for firewall traversal
+- **UDP: 443** (AES-256-CBC encrypted for authenticated users) - Same port as TCP 
+- **Dashboard Web UI: 8080** - Real-time monitoring and administration
 
 ## 1.1 Security Features
-- **TLS/SSL TCP encryption**: All command traffic is encrypted using TLS 1.2/1.3
-- **Self-signed certificate generation**: Server automatically generates certificates if none provided
-- **UDP AES encryption**: Position and input data encrypted with session-specific keys
-- **Player authentication**: Password-based authentication with hashed storage
-- **Session isolation**: Each player gets unique encryption keys
+- **TLS 1.2/1.3 TCP encryption**: All command traffic is encrypted using modern TLS
+- **AES-256-CBC UDP encryption**: Position and input data encrypted with session-specific keys
+- **Advanced packet validation**: Physics-based validation to prevent cheating
+  - Position boundary checking and physics constraint validation
+  - Input range validation for steering, throttle, and brake controls
+  - Timestamp validation to prevent replay attacks
+  - Maximum speed and angular velocity enforcement
+- **Sophisticated rate limiting**: Sliding window rate limiting with burst protection
+  - TCP: 10 messages/second per client (configurable)
+  - UDP: 60 packets/second per client (configurable) 
+  - Automatic cleanup of inactive client data
+  - Real-time utilization monitoring
+- **Multi-tier anti-cheat system**: Real-time threat assessment and violation tracking
+  - Automatic violation counting with configurable thresholds
+  - 4-level threat assessment (0-3 scale)
+  - Configurable auto-kick for repeat offenders
+  - Security event correlation and pattern detection
+- **Comprehensive security monitoring**: Real-time dashboard with analytics
+  - Live security event monitoring with severity levels
+  - Player threat level tracking and visualization
+  - Rate limit utilization monitoring per client
+  - Security statistics with event type breakdown
+- **Player authentication**: SHA-256 password hashing with session management
+- **Session isolation**: Each player gets unique encryption keys and validation state
+- **Administrative controls**: Web-based security management interface
+  - Player banning with customizable reasons
+  - Real-time disconnect capabilities
+  - Security event analysis and filtering
+- **Self-signed certificate generation**: Automatic certificate creation with public IP support
 - **Hybrid UDP support**: Server handles both encrypted (authenticated) and plain (legacy) UDP packets
+- **Security event logging**: Comprehensive logging and threat level assessment with configurable retention
 
 ## 1.2 Recent Critical Fixes
 
@@ -560,23 +588,36 @@ The server supports two types of real-time data that are synchronized between pl
 The server includes a web-based dashboard interface for monitoring and administering the server. The dashboard is accessible via HTTP on port 8080.
 
 ### 11.2 Dashboard Features
-- Real-time monitoring of server statistics:
-  - Server uptime
-  - Active player sessions
-  - Room count and status
-  - Player counts
-- Room management:
-  - View all active rooms
-  - View player distribution across rooms
-  - See room status (lobby or active game)
-  - Age of each room
-- Player session management:
-  - Monitor active player connections
+- **Real-time server monitoring**:
+  - Server uptime and system status
+  - Active player sessions with authentication status
+  - Room count and status (lobby vs active games)
+  - Player distribution across rooms
+- **Advanced security monitoring**:
+  - Live security event tracking with timestamps and severity levels
+  - Player threat level monitoring (0-3 scale with color coding)
+  - Security violation tracking (total and recent violations per player)
+  - Rate limiting status with real-time utilization percentages
+  - Security event type breakdown and statistics
+  - Automatic threat assessment and color-coded warnings
+- **Player management**:
+  - Monitor active player connections with last activity timestamps
   - Check which room each player is in
-  - Track player activity
+  - Track authentication status and session details
+  - View TCP/UDP rate utilization per player
+- **Room management**:
+  - View all active rooms with player counts
+  - Monitor room age and activity status
+  - See host assignments and game states
 
 ### 11.3 Admin Controls
-The dashboard includes administrative controls for server management. These controls do not require authentication as the dashboard is intended for LAN-only access and not exposed to the internet.
+The dashboard includes comprehensive administrative controls for server management. These controls do not require authentication as the dashboard is intended for LAN-only access and not exposed to the internet.
+
+#### Security Management Controls
+- **Player Banning**: Ban players with custom reasons for security violations
+- **Real-time Monitoring**: Track security events, violations, and threat levels
+- **Rate Limit Monitoring**: View real-time TCP/UDP utilization per player
+- **Security Event Analysis**: Filter and analyze security events by type and severity
 
 #### Room Admin Controls
 - **Close Room**: Remove a specific room and return all players to the lobby
@@ -585,6 +626,16 @@ The dashboard includes administrative controls for server management. These cont
 #### Player Admin Controls
 - **Disconnect Player**: Forcibly disconnect a specific player session
 - **Disconnect All Players**: Disconnect all active player sessions
+- **Ban Player**: Permanently ban a player with customizable reason
+
+#### Security Dashboard Features
+- **Multi-tab Security Interface**: 
+  - Overview tab with security statistics and threat status indicators
+  - Security Events tab with real-time event logging and filtering
+  - Player Security tab with individual player threat assessments
+  - Rate Limits tab with per-player utilization monitoring
+- **Threat Level Visualization**: Color-coded threat levels (🟢 Low, 🟡 Medium, 🔴 High)
+- **Real-time Updates**: Auto-refresh every 10 seconds with manual refresh option
 
 #### Admin Actions Process
 When an admin action is performed:
@@ -1699,7 +1750,185 @@ public class NetworkPlayerController : MonoBehaviour
 
 With this complete Unity implementation guide, you can now create a secure racing game client that properly connects to the MP-Server with full TLS encryption for commands and AES encryption for real-time updates. The implementation handles all security aspects while providing a robust foundation for your multiplayer racing game. Happy racing!
 
-## 16. Troubleshooting Guide
+## 16. Advanced Security System Architecture
+
+MP-Server implements a comprehensive, multi-layered security architecture designed to prevent cheating, protect against abuse, and maintain fair gameplay across all connected clients.
+
+### 16.1 Security Layer Overview
+
+The security system operates on four primary layers:
+
+1. **Network Security**: TLS encryption for TCP, AES-256-CBC for UDP
+2. **Authentication Security**: SHA-256 password hashing with session management
+3. **Behavioral Security**: Packet validation, rate limiting, and anti-cheat detection
+4. **Administrative Security**: Real-time monitoring and control systems
+
+### 16.2 Packet Validation System
+
+#### 16.2.1 Physics-Based Validation
+The server validates all incoming position and input data against realistic physics constraints:
+
+**Position Validation**:
+- Boundary checking against defined track limits
+- Maximum velocity enforcement (configurable per game mode)
+- Acceleration constraint validation
+- Position delta validation between updates
+
+**Input Validation**:
+- Steering angle limits (-1.0 to 1.0)
+- Throttle/brake range validation (0.0 to 1.0)
+- Input rate-of-change validation
+- Impossible input combination detection
+
+**Temporal Validation**:
+- Timestamp verification to prevent replay attacks
+- Update frequency validation
+- Chronological order enforcement
+
+#### 16.2.2 Violation Tracking
+```csharp
+// Violation severity levels
+public enum ViolationSeverity
+{
+    Minor = 0,    // Slight physics violations, possible network lag
+    Moderate = 1, // Clear constraint violations, potential cheating
+    Severe = 2,   // Obvious cheating attempts, impossible values
+    Critical = 3  // Malicious activity, coordinated attacks
+}
+```
+
+### 16.3 Rate Limiting Architecture
+
+#### 16.3.1 Sliding Window Implementation
+The rate limiter uses a sophisticated sliding window algorithm:
+
+**TCP Rate Limiting**:
+- Default: 10 messages/second per client
+- Burst protection: Brief spikes allowed, sustained violations blocked
+- Automatic cleanup of inactive client tracking data
+
+**UDP Rate Limiting**:
+- Default: 60 packets/second per client
+- Real-time monitoring of packet frequency
+- Graceful degradation for overloaded clients
+
+#### 16.3.2 Adaptive Throttling
+The system adapts to network conditions:
+- Higher limits for authenticated, trusted clients
+- Reduced limits for clients with security violations
+- Dynamic adjustment based on server load
+
+### 16.4 Anti-Cheat System
+
+#### 16.4.1 Threat Assessment Algorithm
+```csharp
+public int CalculateThreatLevel(PlayerSecurity playerSecurity)
+{
+    var score = 0;
+    score += Math.Min(playerSecurity.ViolationCount / 5, 10);
+    score += playerSecurity.RecentViolations.Count(v => v.Timestamp > DateTime.UtcNow.AddMinutes(-5)) * 2;
+    score += (int)playerSecurity.HighestSeverity;
+    return Math.Min(score, 3); // Cap at level 3
+}
+```
+
+#### 16.4.2 Automated Response System
+- **Level 0 (Green)**: Normal player, no restrictions
+- **Level 1 (Yellow)**: Minor violations, enhanced monitoring
+- **Level 2 (Orange)**: Moderate violations, rate limiting applied
+- **Level 3 (Red)**: High-risk player, auto-kick enabled
+
+### 16.5 Real-Time Security Monitoring
+
+#### 16.5.1 Dashboard Integration
+The web dashboard provides comprehensive security oversight:
+
+**Live Monitoring**:
+- Real-time player threat levels with color coding
+- Active security events with severity indicators
+- Rate limiting utilization percentages per client
+- Geographic distribution of security events
+
+**Historical Analysis**:
+- Security event trends and patterns
+- Player behavior analysis over time
+- Violation type distribution statistics
+- Peak load and attack pattern identification
+
+#### 16.5.2 Administrative Controls
+**Immediate Response Tools**:
+- One-click player disconnection
+- Temporary and permanent ban management
+- IP address blocking with CIDR support
+- Emergency lockdown modes
+
+**Security Configuration**:
+- Real-time adjustment of validation thresholds
+- Rate limiting parameter modification
+- Threat level calculation tuning
+- Auto-kick threshold configuration
+
+### 16.6 Security Event Correlation
+
+#### 16.6.1 Pattern Detection
+The system correlates security events across multiple dimensions:
+
+**Temporal Correlation**:
+- Identifies coordinated attack patterns
+- Detects suspicious timing in violations
+- Recognizes repeated offense patterns
+
+**Behavioral Correlation**:
+- Links similar violation types across players
+- Identifies potential botnet activity
+- Detects unusual gameplay patterns
+
+#### 16.6.2 Threat Intelligence
+**Reputation System**:
+- Player history tracking across sessions
+- IP address reputation scoring
+- Geographic risk assessment
+- Device fingerprinting (where supported)
+
+### 16.7 Performance Optimization
+
+#### 16.7.1 Efficient Processing
+Security operations are optimized for minimal performance impact:
+
+**Parallel Processing**:
+- Security checks run on separate threads
+- Batch processing of validation results
+- Asynchronous threat level calculations
+
+**Memory Management**:
+- Circular buffers for recent violation history
+- Automatic cleanup of stale security data
+- Efficient data structures for real-time access
+
+#### 16.7.2 Scalability Considerations
+The security system scales with server load:
+- Configurable validation strictness based on player count
+- Dynamic resource allocation for security processing
+- Load balancing of security operations across CPU cores
+
+### 16.8 Integration Points
+
+#### 16.8.1 Game Logic Integration
+Security validation integrates seamlessly with game mechanics:
+- Pre-validation hooks before game state updates
+- Post-validation callbacks for security event handling
+- Game-mode-specific validation rule sets
+
+#### 16.8.2 Logging and Alerting
+Comprehensive security logging ensures full audit trails:
+- Structured JSON logging for security events
+- Configurable log retention periods
+- Integration with external security monitoring systems
+- Real-time alerting for critical security events
+
+This advanced security architecture ensures MP-Server maintains the highest standards of fair play while providing administrators with the tools needed to quickly respond to security threats and maintain a positive gaming environment.
+
+## 17. Troubleshooting Guide
 
 ### 16.1 Common UDP Issues
 
