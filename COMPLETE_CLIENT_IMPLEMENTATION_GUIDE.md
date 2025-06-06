@@ -947,6 +947,29 @@ If you encounter issues:
 4. **Test UDP encryption** with known test data
 5. **Ensure JSON formatting** is correct (no BOM)
 6. **Validate packet format** for UDP (length header + encrypted data)
+7. **Use the dashboard** at `http://server-ip:8080` for real-time monitoring
+
+### Dashboard Administration
+
+The server provides a comprehensive web dashboard with user management capabilities:
+
+**User Management Features:**
+- View all user accounts with pagination and search
+- Monitor user login activity and account status
+- Administrative actions: ban/unban users, force password resets, delete accounts
+- View detailed user audit logs and activity history
+- Track online users and active sessions
+
+**Dashboard API Endpoints for Integration:**
+```
+GET /Dashboard/GetUserStats          - User statistics overview
+GET /Dashboard/GetAllUsers           - Paginated user accounts list  
+GET /Dashboard/GetUserAuditLog       - User activity audit trails
+POST /Dashboard/BanUserAccount       - Administrative user banning
+POST /Dashboard/UnbanUserAccount     - Remove user account bans
+POST /Dashboard/ForcePasswordReset   - Force user password resets
+DELETE /Dashboard/DeleteUserAccount  - Delete user accounts permanently
+```
 
 The server has been thoroughly tested and debugged. Most client issues stem from:
 - Missing UDP encryption implementation

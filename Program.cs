@@ -5,6 +5,9 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.EntityFrameworkCore;
+using MP.Server.Data;
+using MP.Server.Services;
 
 // Setup cancellation tokens for clean shutdown
 var serverCts = new CancellationTokenSource();
@@ -17,10 +20,20 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddControllersWithViews();
 builder.Logging.AddConsole();
 
+// Add Entity Framework with SQLite
+builder.Services.AddDbContext<UserDbContext>(options =>
+    options.UseSqlite(builder.Configuration.GetConnectionString("DefaultConnection") 
+        ?? "Data Source=users.db"));
+
+// Register user management services
+builder.Services.AddScoped<UserManagementService>();
+builder.Services.AddScoped<EmailService>();
+
 // Register the racing server as a singleton (with TLS enabled by default)
 builder.Services.AddSingleton<RacingServer>(serviceProvider => 
 {
     var logger = serviceProvider.GetRequiredService<ILogger<RacingServer>>();
+    var userService = serviceProvider.GetRequiredService<UserManagementService>();
     return new RacingServer(443, 443, logger, useTls: true);
 });
 
@@ -42,6 +55,14 @@ try
     app.MapControllerRoute(
         name: "default",
         pattern: "{controller=Dashboard}/{action=Index}/{id?}");
+    
+    // Initialize database
+    using (var scope = app.Services.CreateScope())
+    {
+        var context = scope.ServiceProvider.GetRequiredService<UserDbContext>();
+        await context.Database.EnsureCreatedAsync();
+        Console.WriteLine("Database initialized.");
+    }
     
     // Get the racing server from DI container
     var server = app.Services.GetRequiredService<RacingServer>();

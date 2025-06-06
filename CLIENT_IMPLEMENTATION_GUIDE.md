@@ -1297,6 +1297,49 @@ Access the server's web dashboard at `http://server-ip:8080` to monitor:
 - Room status and player distribution
 - Server uptime and statistics
 - Admin controls for troubleshooting
+- **User management system** with comprehensive administrative controls
+
+#### Dashboard API Endpoints
+
+The dashboard provides HTTP endpoints for server administration:
+
+**Basic Server Information:**
+```
+GET /Dashboard/GetStats               - Server statistics (uptime, sessions, rooms)
+GET /Dashboard/GetRooms              - Active rooms list
+GET /Dashboard/GetSessions           - Active player sessions
+```
+
+**Security Monitoring:**
+```
+GET /Dashboard/GetSecurityStats      - Security overview and threat statistics
+GET /Dashboard/GetSecurityEvents     - Recent security events (limit parameter)
+GET /Dashboard/GetPlayerSecurityDetails - Player threat levels and violations
+GET /Dashboard/GetRateLimitStatus    - Real-time rate limit utilization per player
+```
+
+**User Management System:**
+```
+GET /Dashboard/GetUserStats          - User account statistics (total, active, banned, online)
+GET /Dashboard/GetAllUsers           - Paginated user list (page, pageSize parameters)
+GET /Dashboard/GetOnlineUsers        - Currently active user sessions
+GET /Dashboard/GetUserAuditLog       - User activity audit log (userId, limit parameters)
+```
+
+**Administrative Actions:**
+```
+POST /Dashboard/BanUserAccount       - Ban user account (userId, reason, banDurationDays)
+POST /Dashboard/UnbanUserAccount     - Remove user account ban (userId)
+POST /Dashboard/ForcePasswordReset   - Force password reset (userId)
+DELETE /Dashboard/DeleteUserAccount  - Permanently delete user account (userId)
+POST /Dashboard/BanPlayer           - Ban active player session (sessionId, reason)
+POST /Dashboard/DisconnectPlayer    - Disconnect player session (sessionId)
+POST /Dashboard/DisconnectAllPlayers - Disconnect all active players
+POST /Dashboard/CloseRoom           - Close specific room (roomId)
+POST /Dashboard/CloseAllRooms       - Close all active rooms
+```
+
+These endpoints return JSON responses and are used by the dashboard interface for real-time server management.
 
 ## 10. Performance Optimization
 

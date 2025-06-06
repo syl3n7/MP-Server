@@ -1,16 +1,19 @@
 using Microsoft.AspNetCore.Mvc;
 using System.Text.Json;
 using MP.Server.Security;
+using MP.Server.Services;
 
 namespace MP.Server.Controllers
 {
     public class DashboardController : Controller
     {
         private readonly RacingServer _server;
+        private readonly UserManagementService? _userService;
 
-        public DashboardController(RacingServer server)
+        public DashboardController(RacingServer server, UserManagementService? userService = null)
         {
             _server = server;
+            _userService = userService;
         }
 
         public IActionResult Index()
@@ -360,6 +363,147 @@ namespace MP.Server.Controllers
             }).OrderByDescending(p => Math.Max(p.tcpUtilization, p.udpUtilization));
 
             return Json(rateLimitData);
+        }
+
+        // User Management Endpoints
+
+        [HttpGet]
+        public async Task<IActionResult> GetUserStats()
+        {
+            if (_userService == null)
+            {
+                return Json(new { error = "User management service not available" });
+            }
+
+            var stats = await _userService.GetUserStatisticsAsync();
+            return Json(stats);
+        }
+
+        [HttpGet]
+        public async Task<IActionResult> GetAllUsers(int page = 1, int pageSize = 10)
+        {
+            if (_userService == null)
+            {
+                return Json(new { error = "User management service not available" });
+            }
+
+            var users = await _userService.GetAllUsersAsync(page, pageSize);
+            return Json(users);
+        }
+
+        [HttpGet]
+        public async Task<IActionResult> GetOnlineUsers()
+        {
+            if (_userService == null)
+            {
+                return Json(new { error = "User management service not available" });
+            }
+
+            var sessions = await _userService.GetActiveSessionsAsync();
+            return Json(sessions);
+        }
+
+        [HttpPost]
+        public async Task<IActionResult> BanUserAccount([FromBody] BanUserRequest request)
+        {
+            if (_userService == null)
+            {
+                return Json(new { success = false, message = "User management service not available" });
+            }
+
+            if (string.IsNullOrEmpty(request.UserId) || string.IsNullOrEmpty(request.Reason))
+            {
+                return Json(new { success = false, message = "User ID and reason are required" });
+            }
+
+            var result = await _userService.BanUserAsync(request.UserId, request.Reason, request.BanDurationDays);
+            return Json(new { success = result.Success, message = result.Message });
+        }
+
+        [HttpPost]
+        public async Task<IActionResult> UnbanUserAccount([FromBody] UnbanUserRequest request)
+        {
+            if (_userService == null)
+            {
+                return Json(new { success = false, message = "User management service not available" });
+            }
+
+            if (string.IsNullOrEmpty(request.UserId))
+            {
+                return Json(new { success = false, message = "User ID is required" });
+            }
+
+            var result = await _userService.UnbanUserAsync(request.UserId);
+            return Json(new { success = result.Success, message = result.Message });
+        }
+
+        [HttpPost]
+        public async Task<IActionResult> ForcePasswordReset([FromBody] ForcePasswordResetRequest request)
+        {
+            if (_userService == null)
+            {
+                return Json(new { success = false, message = "User management service not available" });
+            }
+
+            if (string.IsNullOrEmpty(request.UserId))
+            {
+                return Json(new { success = false, message = "User ID is required" });
+            }
+
+            var result = await _userService.AdminInitiatePasswordResetAsync(request.UserId);
+            return Json(new { success = result.Success, message = result.Message });
+        }
+
+        [HttpDelete]
+        public async Task<IActionResult> DeleteUserAccount(string userId)
+        {
+            if (_userService == null)
+            {
+                return Json(new { success = false, message = "User management service not available" });
+            }
+
+            if (string.IsNullOrEmpty(userId))
+            {
+                return Json(new { success = false, message = "User ID is required" });
+            }
+
+            var result = await _userService.DeleteUserAsync(userId);
+            return Json(new { success = result.Success, message = result.Message });
+        }
+
+        [HttpGet]
+        public async Task<IActionResult> GetUserAuditLog(string userId, int limit = 50)
+        {
+            if (_userService == null)
+            {
+                return Json(new { error = "User management service not available" });
+            }
+
+            if (string.IsNullOrEmpty(userId))
+            {
+                return Json(new { error = "User ID is required" });
+            }
+
+            var auditLog = await _userService.GetUserAuditLogAsync(userId, limit);
+            return Json(auditLog);
+        }
+
+        // Helper classes for request bodies
+        public class BanUserRequest
+        {
+            public string UserId { get; set; } = string.Empty;
+            public string Reason { get; set; } = string.Empty;
+            public int? BanDurationDays { get; set; }
+        }
+
+        public class UnbanUserRequest
+        {
+            public string UserId { get; set; } = string.Empty;
+        }
+
+        public class ForcePasswordResetRequest
+        {
+            public string UserId { get; set; } = string.Empty;
         }
     }
 }

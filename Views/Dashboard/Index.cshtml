@@ -186,6 +186,9 @@
                 <li class="nav-item" role="presentation">
                     <button class="nav-link" id="ratelimit-tab" data-tab="ratelimit" type="button" role="tab">Rate Limits</button>
                 </li>
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link" id="users-tab" data-tab="users" type="button" role="tab">User Management</button>
+                </li>
             </ul>
             
             <div class="tab-content" id="securityTabContent">
@@ -286,6 +289,81 @@
                                     <!-- Rate limit data will be displayed here -->
                                 </tbody>
                             </table>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="tab-pane fade security-tab" id="users" role="tabpanel">
+                    <div class="mt-3">
+                        <!-- User Management Statistics -->
+                        <div class="row mb-3">
+                            <div class="col-md-3">
+                                <div class="stat-card">
+                                    <div class="stat-value" id="totalUsers">0</div>
+                                    <div class="stat-label">Total Users</div>
+                                </div>
+                            </div>
+                            <div class="col-md-3">
+                                <div class="stat-card">
+                                    <div class="stat-value" id="activeUsers">0</div>
+                                    <div class="stat-label">Active Users</div>
+                                </div>
+                            </div>
+                            <div class="col-md-3">
+                                <div class="stat-card">
+                                    <div class="stat-value" id="bannedUsers">0</div>
+                                    <div class="stat-label">Banned Users</div>
+                                </div>
+                            </div>
+                            <div class="col-md-3">
+                                <div class="stat-card">
+                                    <div class="stat-value" id="onlineUsers">0</div>
+                                    <div class="stat-label">Online Now</div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- User Management Actions -->
+                        <div class="admin-buttons mb-3">
+                            <button id="refreshUsersBtn" class="btn btn-primary">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
+                                    <path fill-rule="evenodd" d="M8 3a5 5 0 1 0 4.546 2.914.5.5 0 0 1 .908-.417A6 6 0 1 1 8 2z"/>
+                                    <path d="M8 4.466V.534a.25.25 0 0 1 .41-.192l2.36 1.966c.12.1.12.284 0 .384L8.41 4.658A.25.25 0 0 1 8 4.466"/>
+                                </svg>
+                                Refresh Users
+                            </button>
+                            <input type="text" id="userSearchInput" class="form-control" placeholder="Search users..." style="max-width: 200px; display: inline-block;">
+                        </div>
+                        
+                        <!-- Users Table -->
+                        <div class="table-responsive">
+                            <table class="table table-sm table-hover" id="usersTable">
+                                <thead>
+                                    <tr>
+                                        <th>Username</th>
+                                        <th>Email</th>
+                                        <th>Status</th>
+                                        <th>Created</th>
+                                        <th>Last Login</th>
+                                        <th>Login Count</th>
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <!-- User data will be displayed here -->
+                                </tbody>
+                            </table>
+                        </div>
+                        
+                        <!-- Pagination -->
+                        <div id="usersPagination" class="d-flex justify-content-between align-items-center mt-3">
+                            <div>
+                                <span id="usersPageInfo">Page 1 of 1</span>
+                            </div>
+                            <div>
+                                <button id="prevUsersPage" class="btn btn-sm btn-outline-primary" disabled>Previous</button>
+                                <button id="nextUsersPage" class="btn btn-sm btn-outline-primary" disabled>Next</button>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -393,11 +471,41 @@
                 }
             });
             
+            // User Management Event Handlers
+            $("#refreshUsersBtn").click(function() {
+                loadUserManagementData();
+            });
+            
+            $("#userSearchInput").on('input', function() {
+                const searchTerm = $(this).val().toLowerCase();
+                filterUsersTable(searchTerm);
+            });
+            
+            $("#prevUsersPage").click(function() {
+                if (currentUserPage > 1) {
+                    currentUserPage--;
+                    loadUsers();
+                }
+            });
+            
+            $("#nextUsersPage").click(function() {
+                if (currentUserPage < totalUserPages) {
+                    currentUserPage++;
+                    loadUsers();
+                }
+            });
+            
+            // User management variables
+            let currentUserPage = 1;
+            let totalUserPages = 1;
+            let usersPerPage = 20;
+            
             function loadAllData() {
                 loadStats();
                 loadRooms();
                 loadSessions();
                 loadSecurityData();
+                loadUserManagementData();
             }
             
             function loadStats() {
@@ -709,6 +817,308 @@
                     .replace(/>/g, "&gt;")
                     .replace(/"/g, "&quot;")
                     .replace(/'/g, "&#039;");
+            }
+            
+            function loadUserManagementData() {
+                loadUserStats();
+                loadUsers();
+                loadOnlineUsers();
+            }
+            
+            function loadUserStats() {
+                $.getJSON("/Dashboard/GetUserStats", function(data) {
+                    if (data.success) {
+                        $("#totalUsers").text(data.data.totalUsers || 0);
+                        $("#activeUsers").text(data.data.activeUsers || 0);
+                        $("#bannedUsers").text(data.data.bannedUsers || 0);
+                    } else {
+                        console.error("Failed to load user stats:", data.message);
+                    }
+                }).fail(function() {
+                    console.error("Failed to load user stats");
+                });
+            }
+            
+            function loadUsers() {
+                $.getJSON(`/Dashboard/GetAllUsers?page=${currentUserPage}&pageSize=${usersPerPage}`, function(data) {
+                    if (data.success) {
+                        displayUsers(data.data.users);
+                        updateUsersPagination(data.data.totalCount);
+                    } else {
+                        console.error("Failed to load users:", data.message);
+                    }
+                }).fail(function() {
+                    console.error("Failed to load users");
+                });
+            }
+            
+            function loadOnlineUsers() {
+                $.getJSON("/Dashboard/GetOnlineUsers", function(data) {
+                    if (data.success) {
+                        $("#onlineUsers").text(data.data.length || 0);
+                    } else {
+                        console.error("Failed to load online users:", data.message);
+                    }
+                }).fail(function() {
+                    console.error("Failed to load online users");
+                });
+            }
+            
+            function displayUsers(users) {
+                let tbody = $("#usersTable tbody");
+                tbody.empty();
+                
+                if (!users || users.length === 0) {
+                    tbody.append('<tr><td colspan="7" class="text-center">No users found</td></tr>');
+                    return;
+                }
+                
+                users.forEach(function(user) {
+                    let statusBadge = getStatusBadge(user.isBanned, user.isActive);
+                    let createdDate = new Date(user.createdAt).toLocaleDateString();
+                    let lastLoginDate = user.lastLoginAt ? new Date(user.lastLoginAt).toLocaleDateString() : 'Never';
+                    
+                    tbody.append(`<tr data-user-id="${user.id}">
+                        <td>${escapeHtml(user.username)}</td>
+                        <td>${escapeHtml(user.email)}</td>
+                        <td>${statusBadge}</td>
+                        <td>${createdDate}</td>
+                        <td>${lastLoginDate}</td>
+                        <td>${user.loginCount || 0}</td>
+                        <td>
+                            <div class="btn-group" role="group">
+                                ${getUserActionButtons(user)}
+                            </div>
+                        </td>
+                    </tr>`);
+                });
+                
+                // Add event handlers for user actions
+                addUserActionHandlers();
+            }
+            
+            function getStatusBadge(isBanned, isActive) {
+                if (isBanned) {
+                    return '<span class="badge bg-danger">Banned</span>';
+                } else if (isActive) {
+                    return '<span class="badge bg-success">Active</span>';
+                } else {
+                    return '<span class="badge bg-secondary">Inactive</span>';
+                }
+            }
+            
+            function getUserActionButtons(user) {
+                let buttons = [];
+                
+                if (user.isBanned) {
+                    buttons.push(`<button class="btn btn-sm btn-success unban-user-btn" data-user-id="${user.id}" data-username="${escapeHtml(user.username)}">Unban</button>`);
+                } else {
+                    buttons.push(`<button class="btn btn-sm btn-warning ban-user-btn" data-user-id="${user.id}" data-username="${escapeHtml(user.username)}">Ban</button>`);
+                }
+                
+                buttons.push(`<button class="btn btn-sm btn-info reset-password-btn" data-user-id="${user.id}" data-username="${escapeHtml(user.username)}">Reset Password</button>`);
+                buttons.push(`<button class="btn btn-sm btn-secondary audit-log-btn" data-user-id="${user.id}" data-username="${escapeHtml(user.username)}">Audit Log</button>`);
+                buttons.push(`<button class="btn btn-sm btn-danger delete-user-btn" data-user-id="${user.id}" data-username="${escapeHtml(user.username)}">Delete</button>`);
+                
+                return buttons.join(' ');
+            }
+            
+            function addUserActionHandlers() {
+                // Ban user
+                $(".ban-user-btn").click(function() {
+                    const userId = $(this).data("user-id");
+                    const username = $(this).data("username");
+                    const reason = prompt(`Enter ban reason for ${username}:`, "Violation of terms of service");
+                    
+                    if (reason && confirm(`Are you sure you want to ban ${username}?`)) {
+                        $.post("/Dashboard/BanUserAccount", { 
+                            userId: userId, 
+                            reason: reason 
+                        }, function(data) {
+                            if (data.success) {
+                                alert(`User ${username} has been banned.`);
+                                loadUserManagementData();
+                            } else {
+                                alert(`Failed to ban user: ${data.message}`);
+                            }
+                        }).fail(function() {
+                            alert("Failed to ban user due to a network error.");
+                        });
+                    }
+                });
+                
+                // Unban user
+                $(".unban-user-btn").click(function() {
+                    const userId = $(this).data("user-id");
+                    const username = $(this).data("username");
+                    
+                    if (confirm(`Are you sure you want to unban ${username}?`)) {
+                        $.post("/Dashboard/UnbanUserAccount", { 
+                            userId: userId 
+                        }, function(data) {
+                            if (data.success) {
+                                alert(`User ${username} has been unbanned.`);
+                                loadUserManagementData();
+                            } else {
+                                alert(`Failed to unban user: ${data.message}`);
+                            }
+                        }).fail(function() {
+                            alert("Failed to unban user due to a network error.");
+                        });
+                    }
+                });
+                
+                // Force password reset
+                $(".reset-password-btn").click(function() {
+                    const userId = $(this).data("user-id");
+                    const username = $(this).data("username");
+                    
+                    if (confirm(`Are you sure you want to force a password reset for ${username}?`)) {
+                        $.post("/Dashboard/ForcePasswordReset", { 
+                            userId: userId 
+                        }, function(data) {
+                            if (data.success) {
+                                alert(`Password reset initiated for ${username}. They will receive an email with reset instructions.`);
+                            } else {
+                                alert(`Failed to initiate password reset: ${data.message}`);
+                            }
+                        }).fail(function() {
+                            alert("Failed to initiate password reset due to a network error.");
+                        });
+                    }
+                });
+                
+                // Delete user
+                $(".delete-user-btn").click(function() {
+                    const userId = $(this).data("user-id");
+                    const username = $(this).data("username");
+                    
+                    if (confirm(`Are you sure you want to permanently delete ${username}? This action cannot be undone.`)) {
+                        const confirmation = prompt(`Type "${username}" to confirm deletion:`, "");
+                        if (confirmation === username) {
+                            $.post("/Dashboard/DeleteUserAccount", { 
+                                userId: userId 
+                            }, function(data) {
+                                if (data.success) {
+                                    alert(`User ${username} has been deleted.`);
+                                    loadUserManagementData();
+                                } else {
+                                    alert(`Failed to delete user: ${data.message}`);
+                                }
+                            }).fail(function() {
+                                alert("Failed to delete user due to a network error.");
+                            });
+                        } else if (confirmation !== null) {
+                            alert("Username confirmation did not match. Deletion cancelled.");
+                        }
+                    }
+                });
+                
+                // View audit log
+                $(".audit-log-btn").click(function() {
+                    const userId = $(this).data("user-id");
+                    const username = $(this).data("username");
+                    
+                    $.getJSON(`/Dashboard/GetUserAuditLog?userId=${userId}`, function(data) {
+                        if (data.success) {
+                            showAuditLogModal(username, data.data);
+                        } else {
+                            alert(`Failed to load audit log: ${data.message}`);
+                        }
+                    }).fail(function() {
+                        alert("Failed to load audit log due to a network error.");
+                    });
+                });
+            }
+            
+            function updateUsersPagination(totalCount) {
+                totalUserPages = Math.ceil(totalCount / usersPerPage);
+                
+                $("#usersPageInfo").text(`Page ${currentUserPage} of ${totalUserPages} (${totalCount} users)`);
+                
+                $("#prevUsersPage").prop('disabled', currentUserPage <= 1);
+                $("#nextUsersPage").prop('disabled', currentUserPage >= totalUserPages);
+            }
+            
+            function filterUsersTable(searchTerm) {
+                $("#usersTable tbody tr").each(function() {
+                    const row = $(this);
+                    const username = row.find('td:nth-child(1)').text().toLowerCase();
+                    const email = row.find('td:nth-child(2)').text().toLowerCase();
+                    
+                    if (username.includes(searchTerm) || email.includes(searchTerm)) {
+                        row.show();
+                    } else {
+                        row.hide();
+                    }
+                });
+            }
+            
+            function showAuditLogModal(username, auditEntries) {
+                let modalHtml = `
+                    <div class="modal fade" id="auditLogModal" tabindex="-1">
+                        <div class="modal-dialog modal-lg">
+                            <div class="modal-content">
+                                <div class="modal-header">
+                                    <h5 class="modal-title">Audit Log - ${escapeHtml(username)}</h5>
+                                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                                </div>
+                                <div class="modal-body">
+                                    <div class="table-responsive">
+                                        <table class="table table-sm">
+                                            <thead>
+                                                <tr>
+                                                    <th>Timestamp</th>
+                                                    <th>Action</th>
+                                                    <th>Details</th>
+                                                    <th>IP Address</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                `;
+                
+                if (auditEntries && auditEntries.length > 0) {
+                    auditEntries.forEach(function(entry) {
+                        let timestamp = new Date(entry.timestamp).toLocaleString();
+                        modalHtml += `
+                            <tr>
+                                <td>${timestamp}</td>
+                                <td>${escapeHtml(entry.action)}</td>
+                                <td>${escapeHtml(entry.details || '')}</td>
+                                <td>${escapeHtml(entry.ipAddress || '')}</td>
+                            </tr>
+                        `;
+                    });
+                } else {
+                    modalHtml += '<tr><td colspan="4" class="text-center">No audit entries found</td></tr>';
+                }
+                
+                modalHtml += `
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                                <div class="modal-footer">
+                                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+                
+                // Remove existing modal if present
+                $("#auditLogModal").remove();
+                
+                // Add modal to body
+                $("body").append(modalHtml);
+                
+                // Show modal
+                $("#auditLogModal").modal('show');
+                
+                // Clean up modal after hide
+                $("#auditLogModal").on('hidden.bs.modal', function() {
+                    $(this).remove();
+                });
             }
         });
     </script>

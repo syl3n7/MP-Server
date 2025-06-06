@@ -8,6 +8,8 @@ Clients connect over TLS-encrypted TCP (for commands, room management, chat) and
 - ✅ **SECURITY ENHANCED**: Comprehensive packet validation and anti-cheat system
 - ✅ **PERFORMANCE**: Advanced rate limiting and DDoS protection
 - ✅ **MONITORING**: Real-time web dashboard with security analytics
+- ✅ **USER MANAGEMENT**: Complete user account system with authentication and admin controls
+- ✅ **DASHBOARD INTEGRATION**: User management interface in web dashboard
 - ✅ **CRITICAL FIX**: Resolved server-side UDP encryption bug causing JsonReaderException errors
 - ✅ **FIXED**: Race condition in spawn position assignment during game start
 - ✅ **ENHANCED**: Server now properly handles both encrypted and plain UDP packets
@@ -16,7 +18,7 @@ Clients connect over TLS-encrypted TCP (for commands, room management, chat) and
 Ports (defaults):
 - **TCP: 443** (TLS/SSL encrypted) - Uses standard HTTPS port for firewall traversal
 - **UDP: 443** (AES-256-CBC encrypted for authenticated users) - Same port as TCP 
-- **Dashboard Web UI: 8080** - Real-time monitoring and administration
+- **Dashboard Web UI: 8080** - Real-time monitoring, administration, and user management
 
 ## 1.1 Security Features
 - **TLS 1.2/1.3 TCP encryption**: All command traffic is encrypted using modern TLS
@@ -47,6 +49,23 @@ Ports (defaults):
   - Player banning with customizable reasons
   - Real-time disconnect capabilities
   - Security event analysis and filtering
+  - **NEW**: Complete user account management system
+  - **NEW**: User registration, authentication, and profile management
+  - **NEW**: Password reset and email verification capabilities
+  - **NEW**: Admin user management tools (ban/unban, password reset, account deletion)
+  - **NEW**: User audit logging and activity tracking
+- **User Management System**: Comprehensive account system with database persistence
+  - SQLite database backend with Entity Framework Core
+  - BCrypt password hashing for security
+  - Email verification and password reset workflows
+  - User session management and audit logging
+  - Administrative oversight and moderation tools
+- **Enhanced Web Dashboard**: Expanded dashboard with user management integration
+  - User statistics and account overview
+  - Real-time user session monitoring
+  - Administrative user actions (ban, unban, delete, audit logs)
+  - Paginated user browsing with search functionality
+  - Modal-based audit log viewing with detailed activity tracking
 - **Self-signed certificate generation**: Automatic certificate creation with public IP support
 - **Hybrid UDP support**: Server handles both encrypted (authenticated) and plain (legacy) UDP packets
 - **Security event logging**: Comprehensive logging and threat level assessment with configurable retention
@@ -628,14 +647,36 @@ The dashboard includes comprehensive administrative controls for server manageme
 - **Disconnect All Players**: Disconnect all active player sessions
 - **Ban Player**: Permanently ban a player with customizable reason
 
+#### User Management Controls
+- **User Account Overview**: View comprehensive user statistics and account information
+  - Total registered users with creation timestamps
+  - Active vs inactive account status monitoring
+  - Banned user count and management
+  - Real-time online user tracking
+- **User Administration**: Full administrative control over user accounts
+  - **Ban/Unban Users**: Temporarily or permanently ban user accounts with custom reasons
+  - **Password Reset**: Force password reset for any user account with email notification
+  - **Account Deletion**: Permanently delete user accounts with confirmation safeguards
+  - **Audit Log Viewing**: View detailed user activity logs and account history
+- **User Search and Pagination**: Efficiently browse large user databases
+  - Real-time search by username or email address
+  - Paginated user listing with configurable page sizes
+  - Sort by registration date, last login, and account status
+- **Session Management**: Monitor and control active user sessions
+  - View currently logged-in users and their session details
+  - Track user login patterns and activity timestamps
+  - Force disconnect active user sessions when needed
+
 #### Security Dashboard Features
 - **Multi-tab Security Interface**: 
   - Overview tab with security statistics and threat status indicators
   - Security Events tab with real-time event logging and filtering
   - Player Security tab with individual player threat assessments
   - Rate Limits tab with per-player utilization monitoring
+  - **User Management tab**: Complete user account administration interface
 - **Threat Level Visualization**: Color-coded threat levels (🟢 Low, 🟡 Medium, 🔴 High)
 - **Real-time Updates**: Auto-refresh every 10 seconds with manual refresh option
+- **Interactive User Management**: Modal-based audit log viewing and user action confirmations
 
 #### Admin Actions Process
 When an admin action is performed:
@@ -658,6 +699,160 @@ When an admin action is performed:
 - Optimize UDP broadcast for large player counts
 - Implement game state synchronization for deterministic physics
 - Add comprehensive logging and monitoring
+
+## 12. User Management System
+
+### 12.1 Overview
+The MP-Server includes a comprehensive user management system that provides persistent user accounts, authentication, and administrative controls. This system is fully integrated with the web dashboard and provides both automatic registration and manual administration capabilities.
+
+### 12.2 User Account Features
+
+#### 12.2.1 User Registration and Authentication
+- **Automatic Registration**: Users are automatically registered when they first connect with a username and password
+- **Email Verification**: Optional email verification system with configurable SMTP settings
+- **Secure Password Storage**: BCrypt password hashing for maximum security
+- **Session Management**: Secure session handling with automatic cleanup
+- **Account Status Tracking**: Active, inactive, and banned account status management
+
+#### 12.2.2 User Profile Management
+- **User Information**: Username, email, display name, and profile settings
+- **Login Tracking**: Last login timestamps and total login count monitoring
+- **Account Creation**: Registration timestamps and account age tracking
+- **Activity Logging**: Comprehensive audit trail of user actions and account changes
+
+### 12.3 Database Architecture
+
+#### 12.3.1 User Data Storage
+- **Database Backend**: SQLite with Entity Framework Core for reliable data persistence
+- **User Table Structure**:
+  - Unique user IDs and usernames
+  - Secure password hashes (BCrypt)
+  - Email addresses with verification status
+  - Account status flags (active, banned, email verified)
+  - Timestamps (creation, last login, last password change)
+  - Login count and activity tracking
+
+#### 12.3.2 Audit Logging
+- **Activity Tracking**: Complete audit trail of user actions
+- **Administrative Actions**: Detailed logging of admin actions (bans, unbans, deletions)
+- **Security Events**: Login attempts, password changes, and security violations
+- **Data Retention**: Configurable audit log retention policies
+
+### 12.4 Administrative Features
+
+#### 12.4.1 Dashboard Integration
+The user management system is fully integrated into the web dashboard with dedicated interfaces:
+
+**User Statistics Dashboard**:
+- Real-time user count display (total, active, banned, online)
+- User registration trends and activity metrics
+- Account status distribution and health monitoring
+
+**User Management Interface**:
+- Paginated user browsing with search functionality
+- Real-time search by username or email address
+- Sort and filter options for efficient user management
+- Bulk operations support for multiple user actions
+
+#### 12.4.2 Administrative Actions
+**Account Management**:
+- **Ban/Unban Users**: Temporary or permanent account bans with custom reasons
+- **Force Password Reset**: Initiate password reset for any user with email notification
+- **Account Deletion**: Permanently delete user accounts with confirmation safeguards
+- **Account Activation**: Enable or disable user accounts as needed
+
+**Monitoring and Analysis**:
+- **Audit Log Viewing**: Detailed user activity history with modal interface
+- **Session Monitoring**: Track currently active user sessions
+- **Login Pattern Analysis**: Monitor user login behavior and activity patterns
+- **Security Oversight**: Integration with security monitoring for threat assessment
+
+### 12.5 API Endpoints
+
+#### 12.5.1 User Statistics Endpoints
+```
+GET /Dashboard/GetUserStats
+- Returns comprehensive user statistics (total, active, banned, online counts)
+
+GET /Dashboard/GetOnlineUsers  
+- Returns list of currently active user sessions
+
+GET /Dashboard/GetAllUsers?page=1&pageSize=10
+- Returns paginated list of all users with account details
+```
+
+#### 12.5.2 User Management Endpoints
+```
+POST /Dashboard/BanUserAccount
+- Ban a user account with custom reason and optional duration
+- Body: { userId: string, reason: string, banDurationDays?: number }
+
+POST /Dashboard/UnbanUserAccount
+- Remove ban from a user account
+- Body: { userId: string }
+
+POST /Dashboard/ForcePasswordReset
+- Force password reset for a user account
+- Body: { userId: string }
+
+DELETE /Dashboard/DeleteUserAccount?userId=string
+- Permanently delete a user account
+
+GET /Dashboard/GetUserAuditLog?userId=string&limit=50
+- Retrieve audit log entries for a specific user
+```
+
+### 12.6 Security Features
+
+#### 12.6.1 Password Security
+- **BCrypt Hashing**: Industry-standard password hashing with configurable work factor
+- **Password Complexity**: Configurable password requirements and validation
+- **Password Reset**: Secure email-based password reset with time-limited tokens
+- **Brute Force Protection**: Account lockout after failed login attempts
+
+#### 12.6.2 Session Security
+- **Session Isolation**: Each user session is completely isolated and secure
+- **Automatic Cleanup**: Inactive sessions are automatically cleaned up
+- **Session Tracking**: Real-time monitoring of active user sessions
+- **Force Disconnect**: Administrative ability to terminate any user session
+
+### 12.7 Email Integration
+
+#### 12.7.1 Email Verification
+- **Registration Verification**: Optional email verification for new accounts
+- **Configurable SMTP**: Support for any SMTP server configuration
+- **Email Templates**: Customizable email templates for various notifications
+
+#### 12.7.2 Password Recovery
+- **Secure Reset Tokens**: Time-limited, single-use password reset tokens
+- **Email Notifications**: Automatic email notifications for password resets
+- **Admin-Initiated Resets**: Administrators can force password resets for any user
+
+### 12.8 Configuration and Deployment
+
+#### 12.8.1 Database Configuration
+```csharp
+// User management is automatically configured when services are registered
+services.AddDbContext<UserDbContext>(options =>
+    options.UseSqlite(connectionString));
+services.AddScoped<UserManagementService>();
+services.AddScoped<EmailService>();
+```
+
+#### 12.8.2 Email Configuration
+```json
+{
+  "EmailSettings": {
+    "SmtpServer": "smtp.example.com",
+    "SmtpPort": 587,
+    "UseSsl": true,
+    "Username": "your-email@example.com",
+    "Password": "your-app-password",
+    "FromAddress": "noreply@yourserver.com",
+    "FromName": "MP-Server"
+  }
+}
+```
 
 ## 13. Security Implementation Details
 
