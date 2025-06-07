@@ -1,5 +1,7 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.Extensions.Configuration;
 using MP.Server.Services;
 using System.Threading.Tasks;
 
@@ -14,11 +16,19 @@ namespace MP.Server.Controllers
     {
         private readonly ServerManagementService _serverManagement;
         private readonly ILogger<ServerManagementController> _logger;
+        private readonly IWebHostEnvironment _environment;
+        private readonly IConfiguration _configuration;
 
-        public ServerManagementController(ServerManagementService serverManagement, ILogger<ServerManagementController> logger)
+        public ServerManagementController(
+            ServerManagementService serverManagement, 
+            ILogger<ServerManagementController> logger,
+            IWebHostEnvironment environment,
+            IConfiguration configuration)
         {
             _serverManagement = serverManagement;
             _logger = logger;
+            _environment = environment;
+            _configuration = configuration;
         }
 
         /// <summary>
@@ -171,12 +181,28 @@ namespace MP.Server.Controllers
             try
             {
                 var status = _serverManagement.GetServerStatus();
-                return Json(status);
+                
+                // Add environment information
+                var result = new
+                {
+                    isRunning = status.IsRunning,
+                    message = status.Message,
+                    startTime = status.StartTime,
+                    activeSessions = status.ActiveSessions,
+                    activeRooms = status.ActiveRooms,
+                    environment = _environment.EnvironmentName
+                };
+                
+                return Json(result);
             }
             catch (System.Exception ex)
             {
                 _logger.LogError(ex, "Error getting server status");
-                return Json(new { isRunning = false, message = "Error getting server status" });
+                return Json(new { 
+                    isRunning = false, 
+                    message = "Error getting server status",
+                    environment = _environment.EnvironmentName
+                });
             }
         }
 
@@ -184,10 +210,17 @@ namespace MP.Server.Controllers
         /// Start server - used by dashboard
         /// </summary>
         [HttpPost("dashboard-start")]
-        public async Task<IActionResult> DashboardStartServer([FromForm] string connectionString, [FromForm] int tcpPort = 443, [FromForm] int udpPort = 443, [FromForm] bool useTls = true)
+        public async Task<IActionResult> DashboardStartServer([FromForm] int tcpPort = 443, [FromForm] int udpPort = 443, [FromForm] bool useTls = true)
         {
             try
             {
+                // Get connection string from configuration
+                var connectionString = _configuration.GetConnectionString("DefaultConnection");
+                if (string.IsNullOrEmpty(connectionString))
+                {
+                    return Json(new { success = false, message = "Database connection string not configured in appsettings.json" });
+                }
+
                 var config = new ServerConfiguration
                 {
                     ConnectionString = connectionString,

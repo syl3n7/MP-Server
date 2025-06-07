@@ -164,37 +164,27 @@
                 </div>
             </div>
             
-            <!-- Database Configuration -->
+            <!-- Server Configuration -->
             <div class="card mb-3">
                 <div class="card-header">
-                    <h5 class="mb-0">Database Configuration</h5>
+                    <h5 class="mb-0">Server Configuration</h5>
                 </div>
                 <div class="card-body">
                     <div class="row">
-                        <div class="col-md-6">
-                            <div class="mb-3">
-                                <label for="databaseConnectionString" class="form-label">Database Connection String</label>
-                                <input type="text" class="form-control" id="databaseConnectionString" 
-                                       value="Server=localhost;Database=mpserver;User=root;Password=yourpassword;Port=3306;" 
-                                       placeholder="Server=localhost;Database=mpserver;User=root;Password=yourpassword;Port=3306;">
-                            </div>
-                        </div>
-                        <div class="col-md-3">
+                        <div class="col-md-4">
                             <div class="mb-3">
                                 <label for="tcpPort" class="form-label">TCP Port</label>
                                 <input type="number" class="form-control" id="tcpPort" value="443" min="1" max="65535">
                             </div>
                         </div>
-                        <div class="col-md-3">
+                        <div class="col-md-4">
                             <div class="mb-3">
                                 <label for="udpPort" class="form-label">UDP Port</label>
                                 <input type="number" class="form-control" id="udpPort" value="443" min="1" max="65535">
                             </div>
                         </div>
-                    </div>
-                    <div class="row">
-                        <div class="col-md-6">
-                            <div class="form-check">
+                        <div class="col-md-4">
+                            <div class="form-check" style="margin-top: 32px;">
                                 <input class="form-check-input" type="checkbox" id="useTls" checked>
                                 <label class="form-check-label" for="useTls">
                                     Use TLS/SSL
@@ -203,9 +193,10 @@
                         </div>
                     </div>
                     
-                    <div class="mt-3">
-                        <button id="testDatabaseButton" class="btn btn-info me-2">Test Database Connection</button>
-                        <div id="databaseTestResult" class="d-inline-block ms-2"></div>
+                    <div class="alert alert-info">
+                        <i class="bi bi-info-circle"></i> 
+                        Database configuration is loaded from <code>appsettings.json</code>. 
+                        Environment: <strong id="environmentName">Loading...</strong>
                     </div>
                 </div>
             </div>
@@ -559,55 +550,27 @@
             });
             
             // Server Management buttons
-            $("#testDatabaseButton").click(function() {
-                const connectionString = $("#databaseConnectionString").val();
-                
-                if (!connectionString) {
-                    showDatabaseTestResult(false, "Connection string is required");
-                    return;
-                }
-                
-                $(this).prop('disabled', true).text('Testing...');
-                
-                $.post("/ServerManagement/TestDatabase", {
-                    connectionString: connectionString
-                }, function(data) {
-                    showDatabaseTestResult(data.success, data.message);
-                }).fail(function() {
-                    showDatabaseTestResult(false, "Failed to test database connection");
-                }).always(function() {
-                    $("#testDatabaseButton").prop('disabled', false).text('Test Database Connection');
-                });
-            });
-            
             $("#startServerButton").click(function() {
                 const config = {
                     tcpPort: parseInt($("#tcpPort").val()),
                     udpPort: parseInt($("#udpPort").val()),
-                    useTls: $("#useTls").is(':checked'),
-                    databaseConnectionString: $("#databaseConnectionString").val()
+                    useTls: $("#useTls").is(':checked')
                 };
-                
-                if (!config.databaseConnectionString) {
-                    showServerOperationResult(false, "Database connection string is required");
-                    return;
-                }
                 
                 $(this).prop('disabled', true).text('Starting...');
                 
-                $.ajax({
-                    url: "/ServerManagement/Start",
-                    method: "POST",
-                    contentType: "application/json",
-                    data: JSON.stringify(config),
-                    success: function(data) {
-                        showServerOperationResult(data.success, data.message);
-                        if (data.success) {
-                            updateServerControlButtons(true);
-                        }
-                        loadServerStatus();
-                    },
-                    error: function() {
+                $.post("/ServerManagement/dashboard-start", config, function(data) {
+                    showServerOperationResult(data.success, data.message);
+                    if (data.success) {
+                        updateServerControlButtons(true);
+                    }
+                    loadServerStatus();
+                }).fail(function() {
+                    showServerOperationResult(false, "Failed to start server");
+                }).always(function() {
+                    $("#startServerButton").prop('disabled', false).text('Start Server');
+                });
+            });
                         showServerOperationResult(false, "Failed to start server");
                     },
                     complete: function() {
@@ -620,7 +583,7 @@
                 if (confirm("Are you sure you want to stop the server? This will disconnect all players.")) {
                     $(this).prop('disabled', true).text('Stopping...');
                     
-                    $.post("/ServerManagement/Stop", function(data) {
+                    $.post("/ServerManagement/dashboard-stop", function(data) {
                         showServerOperationResult(data.success, data.message);
                         if (data.success) {
                             updateServerControlButtons(false);
@@ -713,7 +676,7 @@
             
             // Server Management Functions
             function loadServerStatus() {
-                $.getJSON("/ServerManagement/Status", function(data) {
+                $.getJSON("/ServerManagement/dashboard-status", function(data) {
                     if (data.isRunning) {
                         $("#serverStatus").text("Running").css("color", "#28a745");
                         $("#serverUptime").text(data.startTime ? getTimeAgo(new Date(data.startTime)) : "-");
@@ -723,9 +686,15 @@
                         $("#serverUptime").text("-");
                         updateServerControlButtons(false);
                     }
+                    
+                    // Show environment info
+                    if (data.environment) {
+                        $("#environmentName").text(data.environment);
+                    }
                 }).fail(function() {
                     $("#serverStatus").text("Unknown").css("color", "#6c757d");
                     $("#serverUptime").text("-");
+                    $("#environmentName").text("Unknown");
                     updateServerControlButtons(false);
                 });
             }
@@ -738,22 +707,6 @@
                     $("#startServerButton").prop('disabled', false);
                     $("#stopServerButton").prop('disabled', true);
                 }
-            }
-            
-            function showDatabaseTestResult(success, message) {
-                const resultDiv = $("#databaseTestResult");
-                resultDiv.empty();
-                
-                if (success) {
-                    resultDiv.html(`<span class="text-success"><i class="bi bi-check-circle"></i> ${message}</span>`);
-                } else {
-                    resultDiv.html(`<span class="text-danger"><i class="bi bi-x-circle"></i> ${message}</span>`);
-                }
-                
-                // Clear the result after 5 seconds
-                setTimeout(() => {
-                    resultDiv.empty();
-                }, 5000);
             }
             
             function showServerOperationResult(success, message) {
