@@ -1,6 +1,5 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
-using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.Configuration;
 using MP.Server.Services;
 using System.Threading.Tasks;
@@ -16,18 +15,15 @@ namespace MP.Server.Controllers
     {
         private readonly ServerManagementService _serverManagement;
         private readonly ILogger<ServerManagementController> _logger;
-        private readonly IWebHostEnvironment _environment;
         private readonly IConfiguration _configuration;
 
         public ServerManagementController(
             ServerManagementService serverManagement, 
             ILogger<ServerManagementController> logger,
-            IWebHostEnvironment environment,
             IConfiguration configuration)
         {
             _serverManagement = serverManagement;
             _logger = logger;
-            _environment = environment;
             _configuration = configuration;
         }
 
@@ -153,15 +149,14 @@ namespace MP.Server.Controllers
             {
                 var status = _serverManagement.GetServerStatus();
                 
-                // Add environment information
+                // Add basic status information
                 var result = new
                 {
                     isRunning = status.IsRunning,
                     message = status.Message,
                     startTime = status.StartTime,
                     activeSessions = status.ActiveSessions,
-                    activeRooms = status.ActiveRooms,
-                    environment = _environment.EnvironmentName
+                    activeRooms = status.ActiveRooms
                 };
                 
                 return Json(result);
@@ -171,8 +166,7 @@ namespace MP.Server.Controllers
                 _logger.LogError(ex, "Error getting server status");
                 return Json(new { 
                     isRunning = false, 
-                    message = "Error getting server status",
-                    environment = _environment.EnvironmentName
+                    message = "Error getting server status"
                 });
             }
         }

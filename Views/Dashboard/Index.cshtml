@@ -195,8 +195,7 @@
                     
                     <div class="alert alert-info">
                         <i class="bi bi-info-circle"></i> 
-                        Database configuration is loaded from <code>appsettings.json</code>. 
-                        Environment: <strong id="environmentName">Loading...</strong>
+                        Database configuration is loaded from <code>appsettings.json</code>
                     </div>
                 </div>
             </div>
@@ -686,15 +685,9 @@
                         $("#serverUptime").text("-");
                         updateServerControlButtons(false);
                     }
-                    
-                    // Show environment info
-                    if (data.environment) {
-                        $("#environmentName").text(data.environment);
-                    }
                 }).fail(function() {
                     $("#serverStatus").text("Unknown").css("color", "#6c757d");
                     $("#serverUptime").text("-");
-                    $("#environmentName").text("Unknown");
                     updateServerControlButtons(false);
                 });
             }
