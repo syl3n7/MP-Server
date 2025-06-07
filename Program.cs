@@ -29,13 +29,8 @@ builder.Services.AddDbContext<UserDbContext>(options =>
 builder.Services.AddScoped<UserManagementService>();
 builder.Services.AddScoped<EmailService>();
 
-// Register the racing server as a singleton (with TLS enabled by default)
-builder.Services.AddSingleton<RacingServer>(serviceProvider => 
-{
-    var logger = serviceProvider.GetRequiredService<ILogger<RacingServer>>();
-    var userService = serviceProvider.GetRequiredService<UserManagementService>();
-    return new RacingServer(443, 443, logger, useTls: true);
-});
+// Register server management service
+builder.Services.AddSingleton<ServerManagementService>();
 
 // Build the web application
 var app = builder.Build();
@@ -56,25 +51,17 @@ try
         name: "default",
         pattern: "{controller=Dashboard}/{action=Index}/{id?}");
     
-    // Initialize database
+    // Initialize database with default connection string if no server is configured
     using (var scope = app.Services.CreateScope())
     {
         var context = scope.ServiceProvider.GetRequiredService<UserDbContext>();
         await context.Database.EnsureCreatedAsync();
-        Console.WriteLine("Database initialized.");
+        Console.WriteLine("Database initialized with default connection.");
     }
-    
-    // Get the racing server from DI container
-    var server = app.Services.GetRequiredService<RacingServer>();
-    
-    // Start the racing server
-    await server.StartAsync(serverCts.Token);
-    Console.WriteLine("Server started! Type 'help' for available commands.");
-    
-    // Launch console UI in separate task
-    var consoleUI = new ConsoleUI(server, serverCts);
-    _ = Task.Run(() => consoleUI.RunAsync(appCts.Token));
-    
+
+    Console.WriteLine("🌐 Web dashboard started! Access it at: http://localhost:8080");
+    Console.WriteLine("📊 Navigate to the dashboard to configure database and start the racing server.");
+
     // Run the web application on port 8080
     app.Urls.Add("http://0.0.0.0:8080");
     await app.RunAsync(appCts.Token);
@@ -89,10 +76,12 @@ catch (Exception ex)
 }
 finally
 {
-    // Clean shutdown
-    var server = app.Services.GetRequiredService<RacingServer>();
-    if (!serverCts.IsCancellationRequested)
-        await server.StopAsync();
+    // Clean shutdown - check if server management service has a running server
+    var serverManagement = app.Services.GetRequiredService<ServerManagementService>();
+    if (serverManagement.IsServerRunning)
+    {
+        await serverManagement.StopServerAsync();
+    }
         
     serverCts.Dispose();
     appCts.Dispose();

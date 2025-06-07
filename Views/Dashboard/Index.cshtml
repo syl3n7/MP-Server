@@ -144,6 +144,92 @@
             Refresh Data
         </button>
         
+        <!-- Server Management Section -->
+        <div class="admin-section">
+            <h2 class="admin-title">🚀 Server Management</h2>
+            
+            <!-- Server Status -->
+            <div class="row mb-3">
+                <div class="col-md-6">
+                    <div class="stat-card">
+                        <div class="stat-value" id="serverStatus">Loading...</div>
+                        <div class="stat-label">Server Status</div>
+                    </div>
+                </div>
+                <div class="col-md-6">
+                    <div class="stat-card">
+                        <div class="stat-value" id="serverUptime">-</div>
+                        <div class="stat-label">Server Uptime</div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Database Configuration -->
+            <div class="card mb-3">
+                <div class="card-header">
+                    <h5 class="mb-0">Database Configuration</h5>
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="databaseConnectionString" class="form-label">Database Connection String</label>
+                                <input type="text" class="form-control" id="databaseConnectionString" 
+                                       value="Data Source=users.db" placeholder="Data Source=users.db">
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="mb-3">
+                                <label for="tcpPort" class="form-label">TCP Port</label>
+                                <input type="number" class="form-control" id="tcpPort" value="443" min="1" max="65535">
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="mb-3">
+                                <label for="udpPort" class="form-label">UDP Port</label>
+                                <input type="number" class="form-control" id="udpPort" value="443" min="1" max="65535">
+                            </div>
+                        </div>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="useTls" checked>
+                                <label class="form-check-label" for="useTls">
+                                    Use TLS/SSL
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="mt-3">
+                        <button id="testDatabaseButton" class="btn btn-info me-2">Test Database Connection</button>
+                        <div id="databaseTestResult" class="d-inline-block ms-2"></div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Server Controls -->
+            <div class="admin-buttons">
+                <button id="startServerButton" class="btn btn-success">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-play-circle" viewBox="0 0 16 16">
+                        <path d="M8 15A7 7 0 1 1 8 1a7 7 0 0 1 0 14m0 1A8 8 0 1 0 8 0a8 8 0 0 0 0 16"/>
+                        <path d="M6.271 5.055a.5.5 0 0 1 .52.038L11 7.055a.5.5 0 0 1 0 .89L6.791 9.907a.5.5 0 0 1-.791-.39V5.383a.5.5 0 0 1 .271-.328"/>
+                    </svg>
+                    Start Server
+                </button>
+                <button id="stopServerButton" class="btn btn-danger" disabled>
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-stop-circle" viewBox="0 0 16 16">
+                        <path d="M8 15A7 7 0 1 1 8 1a7 7 0 0 1 0 14m0 1A8 8 0 1 0 8 0a8 8 0 0 0 0 16"/>
+                        <path d="M5 6.5A1.5 1.5 0 0 1 6.5 5h3A1.5 1.5 0 0 1 11 6.5v3A1.5 1.5 0 0 1 9.5 11h-3A1.5 1.5 0 0 1 5 9.5z"/>
+                    </svg>
+                    Stop Server
+                </button>
+            </div>
+            
+            <div id="serverOperationResult" class="mt-3"></div>
+        </div>
+        
         <div class="admin-section">
             <h2 class="admin-title">Admin Controls</h2>
             <div class="admin-buttons">
@@ -471,6 +557,82 @@
                 }
             });
             
+            // Server Management buttons
+            $("#testDatabaseButton").click(function() {
+                const connectionString = $("#databaseConnectionString").val();
+                
+                if (!connectionString) {
+                    showDatabaseTestResult(false, "Connection string is required");
+                    return;
+                }
+                
+                $(this).prop('disabled', true).text('Testing...');
+                
+                $.post("/ServerManagement/TestDatabase", {
+                    connectionString: connectionString
+                }, function(data) {
+                    showDatabaseTestResult(data.success, data.message);
+                }).fail(function() {
+                    showDatabaseTestResult(false, "Failed to test database connection");
+                }).always(function() {
+                    $("#testDatabaseButton").prop('disabled', false).text('Test Database Connection');
+                });
+            });
+            
+            $("#startServerButton").click(function() {
+                const config = {
+                    tcpPort: parseInt($("#tcpPort").val()),
+                    udpPort: parseInt($("#udpPort").val()),
+                    useTls: $("#useTls").is(':checked'),
+                    databaseConnectionString: $("#databaseConnectionString").val()
+                };
+                
+                if (!config.databaseConnectionString) {
+                    showServerOperationResult(false, "Database connection string is required");
+                    return;
+                }
+                
+                $(this).prop('disabled', true).text('Starting...');
+                
+                $.ajax({
+                    url: "/ServerManagement/Start",
+                    method: "POST",
+                    contentType: "application/json",
+                    data: JSON.stringify(config),
+                    success: function(data) {
+                        showServerOperationResult(data.success, data.message);
+                        if (data.success) {
+                            updateServerControlButtons(true);
+                        }
+                        loadServerStatus();
+                    },
+                    error: function() {
+                        showServerOperationResult(false, "Failed to start server");
+                    },
+                    complete: function() {
+                        $("#startServerButton").prop('disabled', false).text('Start Server');
+                    }
+                });
+            });
+            
+            $("#stopServerButton").click(function() {
+                if (confirm("Are you sure you want to stop the server? This will disconnect all players.")) {
+                    $(this).prop('disabled', true).text('Stopping...');
+                    
+                    $.post("/ServerManagement/Stop", function(data) {
+                        showServerOperationResult(data.success, data.message);
+                        if (data.success) {
+                            updateServerControlButtons(false);
+                        }
+                        loadServerStatus();
+                    }).fail(function() {
+                        showServerOperationResult(false, "Failed to stop server");
+                    }).always(function() {
+                        $("#stopServerButton").prop('disabled', false).text('Stop Server');
+                    });
+                }
+            });
+            
             // User Management Event Handlers
             $("#refreshUsersBtn").click(function() {
                 loadUserManagementData();
@@ -501,6 +663,7 @@
             let usersPerPage = 20;
             
             function loadAllData() {
+                loadServerStatus();
                 loadStats();
                 loadRooms();
                 loadSessions();
@@ -510,6 +673,17 @@
             
             function loadStats() {
                 $.getJSON("/Dashboard/GetStats", function(data) {
+                    if (data.error) {
+                        // Server is not running, show default values
+                        $("#statsContainer").empty();
+                        $("#statsContainer").append(createStatCard("Server Uptime", "Server not running"));
+                        $("#statsContainer").append(createStatCard("Active Sessions", "0"));
+                        $("#statsContainer").append(createStatCard("Total Rooms", "0"));
+                        $("#statsContainer").append(createStatCard("Active Games", "0"));
+                        $("#statsContainer").append(createStatCard("Players In Rooms", "0"));
+                        return;
+                    }
+                    
                     // Format uptime nicely
                     let uptimeStr = formatTimeSpan(data.uptime);
                     
@@ -522,6 +696,10 @@
                     $("#statsContainer").append(createStatCard("Total Rooms", data.totalRooms));
                     $("#statsContainer").append(createStatCard("Active Games", data.activeGames));
                     $("#statsContainer").append(createStatCard("Players In Rooms", data.playersInRooms));
+                }).fail(function() {
+                    // Handle connection error
+                    $("#statsContainer").empty();
+                    $("#statsContainer").append(createStatCard("Server Status", "Connection Error"));
                 });
             }
             
@@ -532,10 +710,80 @@
                 </div>`;
             }
             
+            // Server Management Functions
+            function loadServerStatus() {
+                $.getJSON("/ServerManagement/Status", function(data) {
+                    if (data.isRunning) {
+                        $("#serverStatus").text("Running").css("color", "#28a745");
+                        $("#serverUptime").text(data.startTime ? getTimeAgo(new Date(data.startTime)) : "-");
+                        updateServerControlButtons(true);
+                    } else {
+                        $("#serverStatus").text("Stopped").css("color", "#dc3545");
+                        $("#serverUptime").text("-");
+                        updateServerControlButtons(false);
+                    }
+                }).fail(function() {
+                    $("#serverStatus").text("Unknown").css("color", "#6c757d");
+                    $("#serverUptime").text("-");
+                    updateServerControlButtons(false);
+                });
+            }
+            
+            function updateServerControlButtons(isRunning) {
+                if (isRunning) {
+                    $("#startServerButton").prop('disabled', true);
+                    $("#stopServerButton").prop('disabled', false);
+                } else {
+                    $("#startServerButton").prop('disabled', false);
+                    $("#stopServerButton").prop('disabled', true);
+                }
+            }
+            
+            function showDatabaseTestResult(success, message) {
+                const resultDiv = $("#databaseTestResult");
+                resultDiv.empty();
+                
+                if (success) {
+                    resultDiv.html(`<span class="text-success"><i class="bi bi-check-circle"></i> ${message}</span>`);
+                } else {
+                    resultDiv.html(`<span class="text-danger"><i class="bi bi-x-circle"></i> ${message}</span>`);
+                }
+                
+                // Clear the result after 5 seconds
+                setTimeout(() => {
+                    resultDiv.empty();
+                }, 5000);
+            }
+            
+            function showServerOperationResult(success, message) {
+                const resultDiv = $("#serverOperationResult");
+                resultDiv.empty();
+                
+                const alertClass = success ? "alert-success" : "alert-danger";
+                const icon = success ? "bi-check-circle" : "bi-x-circle";
+                
+                resultDiv.html(`
+                    <div class="alert ${alertClass} alert-dismissible fade show" role="alert">
+                        <i class="bi ${icon}"></i> ${message}
+                        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                    </div>
+                `);
+                
+                // Auto-dismiss after 10 seconds
+                setTimeout(() => {
+                    resultDiv.find('.alert').alert('close');
+                }, 10000);
+            }
+            
             function loadRooms() {
                 $.getJSON("/Dashboard/GetRooms", function(data) {
                     let tbody = $("#roomsTable tbody");
                     tbody.empty();
+                    
+                    if (data.error) {
+                        tbody.append('<tr><td colspan="5" class="text-center text-muted">Server not running</td></tr>');
+                        return;
+                    }
                     
                     if (data.length === 0) {
                         tbody.append('<tr><td colspan="5" class="text-center">No rooms available</td></tr>');
@@ -585,6 +833,11 @@
                 $.getJSON("/Dashboard/GetSessions", function(data) {
                     let tbody = $("#sessionsTable tbody");
                     tbody.empty();
+                    
+                    if (data.error) {
+                        tbody.append('<tr><td colspan="4" class="text-center text-muted">Server not running</td></tr>');
+                        return;
+                    }
                     
                     if (data.length === 0) {
                         tbody.append('<tr><td colspan="4" class="text-center">No active sessions</td></tr>');

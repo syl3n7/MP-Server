@@ -7,12 +7,12 @@ namespace MP.Server.Controllers
 {
     public class DashboardController : Controller
     {
-        private readonly RacingServer _server;
+        private readonly ServerManagementService _serverManagement;
         private readonly UserManagementService? _userService;
 
-        public DashboardController(RacingServer server, UserManagementService? userService = null)
+        public DashboardController(ServerManagementService serverManagement, UserManagementService? userService = null)
         {
-            _server = server;
+            _serverManagement = serverManagement;
             _userService = userService;
         }
 
@@ -24,12 +24,18 @@ namespace MP.Server.Controllers
         [HttpGet]
         public IActionResult GetStats()
         {
-            var sessions = _server.GetAllSessions();
-            var rooms = _server.GetAllRooms();
+            var server = _serverManagement.GetServer();
+            if (server == null)
+            {
+                return Json(new { error = "Server is not running" });
+            }
+
+            var sessions = server.GetAllSessions();
+            var rooms = server.GetAllRooms();
             
             var stats = new
             {
-                uptime = FormatUptime(DateTime.UtcNow - _server.StartTime),
+                uptime = FormatUptime(DateTime.UtcNow - server.StartTime),
                 activeSessions = sessions.Count,
                 totalRooms = rooms.Count,
                 activeGames = rooms.Count(r => r.IsActive),
@@ -63,7 +69,13 @@ namespace MP.Server.Controllers
         [HttpGet]
         public IActionResult GetRooms()
         {
-            var rooms = _server.GetAllRooms().Select(r => new 
+            var server = _serverManagement.GetServer();
+            if (server == null)
+            {
+                return Json(new { error = "Server is not running" });
+            }
+
+            var rooms = server.GetAllRooms().Select(r => new 
             {
                 id = r.Id,
                 name = r.Name,
@@ -79,7 +91,13 @@ namespace MP.Server.Controllers
         [HttpGet]
         public IActionResult GetSessions()
         {
-            var sessions = _server.GetAllSessions().Select(s => new
+            var server = _serverManagement.GetServer();
+            if (server == null)
+            {
+                return Json(new { error = "Server is not running" });
+            }
+
+            var sessions = server.GetAllSessions().Select(s => new
             {
                 id = s.Id,
                 name = s.PlayerName,
@@ -93,19 +111,25 @@ namespace MP.Server.Controllers
         [HttpPost]
         public IActionResult CloseRoom(string roomId)
         {
+            var server = _serverManagement.GetServer();
+            if (server == null)
+            {
+                return Json(new { success = false, message = "Server is not running" });
+            }
+
             if (string.IsNullOrEmpty(roomId))
             {
                 return Json(new { success = false, message = "Room ID is required" });
             }
 
-            var room = _server.GetAllRooms().FirstOrDefault(r => r.Id == roomId);
+            var room = server.GetAllRooms().FirstOrDefault(r => r.Id == roomId);
             if (room == null)
             {
                 return Json(new { success = false, message = "Room not found" });
             }
 
             // Get all players in the room
-            var playersInRoom = _server.GetAllSessions().Where(s => s.CurrentRoomId == roomId).ToList();
+            var playersInRoom = server.GetAllSessions().Where(s => s.CurrentRoomId == roomId).ToList();
             
             // Reset currentRoomId for all players in the room
             foreach (var player in playersInRoom)
@@ -115,7 +139,7 @@ namespace MP.Server.Controllers
             }
 
             // Remove the room
-            _server.RemoveRoom(roomId);
+            server.RemoveRoom(roomId);
 
             return Json(new { success = true, message = $"Room '{room.Name}' closed and {playersInRoom.Count} players removed" });
         }
@@ -123,14 +147,20 @@ namespace MP.Server.Controllers
         [HttpPost]
         public IActionResult CloseAllRooms()
         {
-            var rooms = _server.GetAllRooms().ToList();
+            var server = _serverManagement.GetServer();
+            if (server == null)
+            {
+                return Json(new { success = false, message = "Server is not running" });
+            }
+
+            var rooms = server.GetAllRooms().ToList();
             int roomCount = rooms.Count;
             int playerCount = 0;
 
             foreach (var room in rooms)
             {
                 // Get all players in the room
-                var playersInRoom = _server.GetAllSessions().Where(s => s.CurrentRoomId == room.Id).ToList();
+                var playersInRoom = server.GetAllSessions().Where(s => s.CurrentRoomId == room.Id).ToList();
                 playerCount += playersInRoom.Count;
                 
                 // Reset currentRoomId for all players in the room
@@ -141,7 +171,7 @@ namespace MP.Server.Controllers
                 }
 
                 // Remove the room
-                _server.RemoveRoom(room.Id);
+                server.RemoveRoom(room.Id);
             }
 
             return Json(new { success = true, message = $"Closed {roomCount} rooms and removed {playerCount} players from rooms" });
@@ -150,12 +180,18 @@ namespace MP.Server.Controllers
         [HttpPost]
         public async Task<IActionResult> DisconnectPlayer(string sessionId)
         {
+            var server = _serverManagement.GetServer();
+            if (server == null)
+            {
+                return Json(new { success = false, message = "Server is not running" });
+            }
+
             if (string.IsNullOrEmpty(sessionId))
             {
                 return Json(new { success = false, message = "Session ID is required" });
             }
 
-            var player = _server.GetPlayerSession(sessionId);
+            var player = server.GetPlayerSession(sessionId);
             if (player == null)
             {
                 return Json(new { success = false, message = "Player not found" });
@@ -164,7 +200,7 @@ namespace MP.Server.Controllers
             // If player is in a room, remove them
             if (!string.IsNullOrEmpty(player.CurrentRoomId))
             {
-                var room = _server.GetAllRooms().FirstOrDefault(r => r.Id == player.CurrentRoomId);
+                var room = server.GetAllRooms().FirstOrDefault(r => r.Id == player.CurrentRoomId);
                 if (room != null)
                 {
                     room.TryRemovePlayer(sessionId);
@@ -182,7 +218,7 @@ namespace MP.Server.Controllers
                     // If room is now empty and not active, remove it
                     if (room.PlayerCount == 0 && !room.IsActive)
                     {
-                        _server.RemoveRoom(room.Id);
+                        server.RemoveRoom(room.Id);
                     }
                 }
             }
@@ -197,7 +233,13 @@ namespace MP.Server.Controllers
         [HttpPost]
         public async Task<IActionResult> DisconnectAllPlayers()
         {
-            var sessions = _server.GetAllSessions().ToList();
+            var server = _serverManagement.GetServer();
+            if (server == null)
+            {
+                return Json(new { success = false, message = "Server is not running" });
+            }
+
+            var sessions = server.GetAllSessions().ToList();
             int sessionCount = sessions.Count;
 
             foreach (var player in sessions)
@@ -205,7 +247,7 @@ namespace MP.Server.Controllers
                 // If player is in a room, remove them
                 if (!string.IsNullOrEmpty(player.CurrentRoomId))
                 {
-                    var room = _server.GetAllRooms().FirstOrDefault(r => r.Id == player.CurrentRoomId);
+                    var room = server.GetAllRooms().FirstOrDefault(r => r.Id == player.CurrentRoomId);
                     if (room != null)
                     {
                         room.TryRemovePlayer(player.Id);
@@ -218,10 +260,10 @@ namespace MP.Server.Controllers
             }
 
             // Clear all empty rooms
-            var emptyRooms = _server.GetAllRooms().Where(r => r.PlayerCount == 0 && !r.IsActive).ToList();
+            var emptyRooms = server.GetAllRooms().Where(r => r.PlayerCount == 0 && !r.IsActive).ToList();
             foreach (var room in emptyRooms)
             {
-                _server.RemoveRoom(room.Id);
+                server.RemoveRoom(room.Id);
             }
 
             return Json(new { success = true, message = $"Disconnected {sessionCount} players" });
@@ -232,8 +274,14 @@ namespace MP.Server.Controllers
         [HttpGet]
         public IActionResult GetSecurityStats()
         {
-            var sessions = _server.GetAllSessions();
-            var securityEvents = _server.SecurityManager.GetRecentEvents(100);
+            var server = _serverManagement.GetServer();
+            if (server == null)
+            {
+                return Json(new { error = "Server is not running" });
+            }
+
+            var sessions = server.GetAllSessions();
+            var securityEvents = server.SecurityManager.GetRecentEvents(100);
             
             var stats = new
             {
@@ -241,10 +289,10 @@ namespace MP.Server.Controllers
                 recentEvents = securityEvents.Count(e => e.Timestamp >= DateTime.UtcNow.AddMinutes(-5)),
                 eventsByType = securityEvents.GroupBy(e => e.EventType.ToString())
                     .ToDictionary(g => g.Key, g => g.Count()),
-                threatLevels = sessions.Select(s => _server.SecurityManager.GetPlayerStats(s.Id))
+                threatLevels = sessions.Select(s => server.SecurityManager.GetPlayerStats(s.Id))
                     .GroupBy(stats => stats.ThreatLevel)
                     .ToDictionary(g => g.Key, g => g.Count()),
-                highThreatPlayers = sessions.Select(s => _server.SecurityManager.GetPlayerStats(s.Id))
+                highThreatPlayers = sessions.Select(s => server.SecurityManager.GetPlayerStats(s.Id))
                     .Where(stats => stats.ThreatLevel >= 2)
                     .Count()
             };
@@ -255,7 +303,13 @@ namespace MP.Server.Controllers
         [HttpGet]
         public IActionResult GetSecurityEvents(int limit = 50)
         {
-            var events = _server.SecurityManager.GetRecentEvents(limit)
+            var server = _serverManagement.GetServer();
+            if (server == null)
+            {
+                return Json(new { error = "Server is not running" });
+            }
+
+            var events = server.SecurityManager.GetRecentEvents(limit)
                 .OrderByDescending(e => e.Timestamp)
                 .Select(e => new
                 {
@@ -273,10 +327,16 @@ namespace MP.Server.Controllers
         [HttpGet]
         public IActionResult GetPlayerSecurityDetails()
         {
-            var sessions = _server.GetAllSessions();
+            var server = _serverManagement.GetServer();
+            if (server == null)
+            {
+                return Json(new { error = "Server is not running" });
+            }
+
+            var sessions = server.GetAllSessions();
             var playerSecurityData = sessions.Select(s =>
             {
-                var stats = _server.SecurityManager.GetPlayerStats(s.Id);
+                var stats = server.SecurityManager.GetPlayerStats(s.Id);
                 return new
                 {
                     id = s.Id,
@@ -298,12 +358,18 @@ namespace MP.Server.Controllers
         [HttpPost]
         public async Task<IActionResult> BanPlayer(string sessionId, string reason = "Security violation")
         {
+            var server = _serverManagement.GetServer();
+            if (server == null)
+            {
+                return Json(new { success = false, message = "Server is not running" });
+            }
+
             if (string.IsNullOrEmpty(sessionId))
             {
                 return Json(new { success = false, message = "Session ID is required" });
             }
 
-            var player = _server.GetPlayerSession(sessionId);
+            var player = server.GetPlayerSession(sessionId);
             if (player == null)
             {
                 return Json(new { success = false, message = "Player not found" });
@@ -312,7 +378,7 @@ namespace MP.Server.Controllers
             // Remove from room if in one
             if (!string.IsNullOrEmpty(player.CurrentRoomId))
             {
-                var room = _server.GetAllRooms().FirstOrDefault(r => r.Id == player.CurrentRoomId);
+                var room = server.GetAllRooms().FirstOrDefault(r => r.Id == player.CurrentRoomId);
                 if (room != null)
                 {
                     room.TryRemovePlayer(sessionId);
@@ -329,7 +395,7 @@ namespace MP.Server.Controllers
                     
                     if (room.PlayerCount == 0 && !room.IsActive)
                     {
-                        _server.RemoveRoom(room.Id);
+                        server.RemoveRoom(room.Id);
                     }
                 }
             }
@@ -344,10 +410,16 @@ namespace MP.Server.Controllers
         [HttpGet]
         public IActionResult GetRateLimitStatus()
         {
-            var sessions = _server.GetAllSessions();
+            var server = _serverManagement.GetServer();
+            if (server == null)
+            {
+                return Json(new { error = "Server is not running" });
+            }
+
+            var sessions = server.GetAllSessions();
             var rateLimitData = sessions.Select(s =>
             {
-                var stats = _server.SecurityManager.GetPlayerStats(s.Id);
+                var stats = server.SecurityManager.GetPlayerStats(s.Id);
                 return new
                 {
                     sessionId = s.Id,
