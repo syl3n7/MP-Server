@@ -20,10 +20,11 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddControllersWithViews();
 builder.Logging.AddConsole();
 
-// Add Entity Framework with SQLite
+// Add Entity Framework with MariaDB
+var connectionString = builder.Configuration.GetConnectionString("DefaultConnection") 
+    ?? "Server=localhost;Database=mpserver;User=root;Password=yourpassword;";
 builder.Services.AddDbContext<UserDbContext>(options =>
-    options.UseSqlite(builder.Configuration.GetConnectionString("DefaultConnection") 
-        ?? "Data Source=users.db"));
+    options.UseMySql(connectionString, ServerVersion.AutoDetect(connectionString)));
 
 // Register user management services
 builder.Services.AddScoped<UserManagementService>();

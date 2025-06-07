@@ -146,7 +146,7 @@ namespace MP.Server.Services
             try
             {
                 var optionsBuilder = new DbContextOptionsBuilder<UserDbContext>();
-                optionsBuilder.UseSqlite(connectionString);
+                optionsBuilder.UseMySql(connectionString, ServerVersion.AutoDetect(connectionString));
 
                 using var context = new UserDbContext(optionsBuilder.Options);
                 await context.Database.CanConnectAsync();
@@ -183,7 +183,7 @@ namespace MP.Server.Services
         public int TcpPort { get; set; } = 443;
         public int UdpPort { get; set; } = 443;
         public bool UseTls { get; set; } = true;
-        public string DatabaseConnectionString { get; set; } = "Data Source=users.db";
+        public string DatabaseConnectionString { get; set; } = "Server=localhost;Database=mpserver;User=root;Password=yourpassword;Port=3306;";
     }
 
     /// <summary>
