@@ -558,7 +558,7 @@
                 
                 $(this).prop('disabled', true).text('Starting...');
                 
-                $.post("/ServerManagement/dashboard-start", config, function(data) {
+                $.post("/api/ServerManagement/dashboard-start", config, function(data) {
                     showServerOperationResult(data.success, data.message);
                     if (data.success) {
                         updateServerControlButtons(true);
@@ -570,19 +570,12 @@
                     $("#startServerButton").prop('disabled', false).text('Start Server');
                 });
             });
-                        showServerOperationResult(false, "Failed to start server");
-                    },
-                    complete: function() {
-                        $("#startServerButton").prop('disabled', false).text('Start Server');
-                    }
-                });
-            });
             
             $("#stopServerButton").click(function() {
                 if (confirm("Are you sure you want to stop the server? This will disconnect all players.")) {
                     $(this).prop('disabled', true).text('Stopping...');
                     
-                    $.post("/ServerManagement/dashboard-stop", function(data) {
+                    $.post("/api/ServerManagement/dashboard-stop", function(data) {
                         showServerOperationResult(data.success, data.message);
                         if (data.success) {
                             updateServerControlButtons(false);
@@ -675,7 +668,7 @@
             
             // Server Management Functions
             function loadServerStatus() {
-                $.getJSON("/ServerManagement/dashboard-status", function(data) {
+                $.getJSON("/api/ServerManagement/dashboard-status", function(data) {
                     if (data.isRunning) {
                         $("#serverStatus").text("Running").css("color", "#28a745");
                         $("#serverUptime").text(data.startTime ? getTimeAgo(new Date(data.startTime)) : "-");
