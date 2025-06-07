@@ -28,13 +28,13 @@ namespace MP.Server.Data
                 entity.HasIndex(e => e.Email).IsUnique();
                 
                 entity.Property(e => e.CreatedAt)
-                    .HasDefaultValueSql("datetime('now')");
+                    .HasDefaultValueSql("CURRENT_TIMESTAMP(6)");
                     
                 entity.Property(e => e.LastLoginAt)
-                    .HasDefaultValueSql("datetime('now')");
+                    .HasDefaultValueSql("CURRENT_TIMESTAMP(6)");
                     
                 entity.Property(e => e.UpdatedAt)
-                    .HasDefaultValueSql("datetime('now')");
+                    .HasDefaultValueSql("CURRENT_TIMESTAMP(6)");
             });
             
             // UserSession configuration
@@ -49,10 +49,10 @@ namespace MP.Server.Data
                 entity.HasIndex(e => e.UserId);
                 
                 entity.Property(e => e.CreatedAt)
-                    .HasDefaultValueSql("datetime('now')");
+                    .HasDefaultValueSql("CURRENT_TIMESTAMP(6)");
                     
                 entity.Property(e => e.LastActivity)
-                    .HasDefaultValueSql("datetime('now')");
+                    .HasDefaultValueSql("CURRENT_TIMESTAMP(6)");
             });
             
             // PasswordResetRequest configuration
@@ -66,7 +66,7 @@ namespace MP.Server.Data
                 entity.HasIndex(e => e.Token).IsUnique();
                 
                 entity.Property(e => e.CreatedAt)
-                    .HasDefaultValueSql("datetime('now')");
+                    .HasDefaultValueSql("CURRENT_TIMESTAMP(6)");
             });
             
             // LoginAuditLog configuration
