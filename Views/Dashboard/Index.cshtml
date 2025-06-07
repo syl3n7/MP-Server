@@ -505,14 +505,21 @@
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/js/bootstrap.bundle.min.js"></script>
     <script>
         $(document).ready(function() {
+            console.log("Document ready, initializing dashboard...");
+            console.log("jQuery version:", $.fn.jquery);
+            console.log("Server status element exists:", $("#serverStatus").length > 0);
+            console.log("Start button exists:", $("#startServerButton").length > 0);
+            
             // Load data on page load
             loadAllData();
             
             // Set up auto-refresh every 10 seconds
             setInterval(loadAllData, 10000);
+            console.log("Auto-refresh set up for every 10 seconds");
             
             // Manual refresh button
             $("#refreshButton").click(function() {
+                console.log("Manual refresh button clicked");
                 loadAllData();
             });
 
@@ -550,21 +557,25 @@
             
             // Server Management buttons
             $("#startServerButton").click(function() {
+                console.log("Start server button clicked");
                 const config = {
                     tcpPort: parseInt($("#tcpPort").val()),
                     udpPort: parseInt($("#udpPort").val()),
                     useTls: $("#useTls").is(':checked')
                 };
                 
+                console.log("Server config:", config);
                 $(this).prop('disabled', true).text('Starting...');
                 
                 $.post("/api/ServerManagement/dashboard-start", config, function(data) {
+                    console.log("Start server response:", data);
                     showServerOperationResult(data.success, data.message);
                     if (data.success) {
                         updateServerControlButtons(true);
                     }
                     loadServerStatus();
-                }).fail(function() {
+                }).fail(function(xhr, status, error) {
+                    console.error("Start server failed:", status, error);
                     showServerOperationResult(false, "Failed to start server");
                 }).always(function() {
                     $("#startServerButton").prop('disabled', false).text('Start Server');
@@ -668,17 +679,22 @@
             
             // Server Management Functions
             function loadServerStatus() {
+                console.log("Loading server status...");
                 $.getJSON("/api/ServerManagement/dashboard-status", function(data) {
+                    console.log("Server status response:", data);
                     if (data.isRunning) {
+                        console.log("Server is running, updating UI...");
                         $("#serverStatus").text("Running").css("color", "#28a745");
                         $("#serverUptime").text(data.startTime ? getTimeAgo(new Date(data.startTime)) : "-");
                         updateServerControlButtons(true);
                     } else {
+                        console.log("Server is stopped, updating UI...");
                         $("#serverStatus").text("Stopped").css("color", "#dc3545");
                         $("#serverUptime").text("-");
                         updateServerControlButtons(false);
                     }
-                }).fail(function() {
+                }).fail(function(xhr, status, error) {
+                    console.error("Failed to load server status:", status, error);
                     $("#serverStatus").text("Unknown").css("color", "#6c757d");
                     $("#serverUptime").text("-");
                     updateServerControlButtons(false);
@@ -686,12 +702,15 @@
             }
             
             function updateServerControlButtons(isRunning) {
+                console.log("Updating server control buttons, isRunning:", isRunning);
                 if (isRunning) {
                     $("#startServerButton").prop('disabled', true);
                     $("#stopServerButton").prop('disabled', false);
+                    console.log("Start button disabled, stop button enabled");
                 } else {
                     $("#startServerButton").prop('disabled', false);
                     $("#stopServerButton").prop('disabled', true);
+                    console.log("Start button enabled, stop button disabled");
                 }
             }
             
