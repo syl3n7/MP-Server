@@ -10,7 +10,7 @@ namespace MP.Server.Controllers
     /// </summary>
     [ApiController]
     [Route("api/[controller]")]
-    public class ServerManagementController : ControllerBase
+    public class ServerManagementController : Controller
     {
         private readonly ServerManagementService _serverManagement;
         private readonly ILogger<ServerManagementController> _logger;
@@ -159,6 +159,86 @@ namespace MP.Server.Controllers
             {
                 _logger.LogError(ex, "Error getting server stats");
                 return StatusCode(500, new { message = "Error getting server stats" });
+            }
+        }
+
+        /// <summary>
+        /// Get current server status - used by dashboard
+        /// </summary>
+        [HttpGet("dashboard-status")]
+        public IActionResult DashboardStatus()
+        {
+            try
+            {
+                var status = _serverManagement.GetServerStatus();
+                return Json(status);
+            }
+            catch (System.Exception ex)
+            {
+                _logger.LogError(ex, "Error getting server status");
+                return Json(new { isRunning = false, message = "Error getting server status" });
+            }
+        }
+
+        /// <summary>
+        /// Start server - used by dashboard
+        /// </summary>
+        [HttpPost("dashboard-start")]
+        public async Task<IActionResult> DashboardStartServer([FromForm] string connectionString, [FromForm] int tcpPort = 443, [FromForm] int udpPort = 443, [FromForm] bool useTls = true)
+        {
+            try
+            {
+                var config = new ServerConfiguration
+                {
+                    ConnectionString = connectionString,
+                    TcpPort = tcpPort,
+                    UdpPort = udpPort,
+                    UseTls = useTls
+                };
+
+                var result = await _serverManagement.StartServerAsync(config);
+                return Json(new { success = result.Success, message = result.Message });
+            }
+            catch (System.Exception ex)
+            {
+                _logger.LogError(ex, "Error starting server");
+                return Json(new { success = false, message = $"Error starting server: {ex.Message}" });
+            }
+        }
+
+        /// <summary>
+        /// Stop server - used by dashboard
+        /// </summary>
+        [HttpPost("dashboard-stop")]
+        public async Task<IActionResult> DashboardStopServer()
+        {
+            try
+            {
+                var result = await _serverManagement.StopServerAsync();
+                return Json(new { success = result.Success, message = result.Message });
+            }
+            catch (System.Exception ex)
+            {
+                _logger.LogError(ex, "Error stopping server");
+                return Json(new { success = false, message = $"Error stopping server: {ex.Message}" });
+            }
+        }
+
+        /// <summary>
+        /// Test database connection - used by dashboard
+        /// </summary>
+        [HttpPost("dashboard-test-db")]
+        public async Task<IActionResult> DashboardTestDatabase([FromForm] string connectionString)
+        {
+            try
+            {
+                var result = await _serverManagement.TestDatabaseConnectionAsync(connectionString);
+                return Json(new { success = result.Success, message = result.Message });
+            }
+            catch (System.Exception ex)
+            {
+                _logger.LogError(ex, "Error testing database connection");
+                return Json(new { success = false, message = $"Error testing database: {ex.Message}" });
             }
         }
 

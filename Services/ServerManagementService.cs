@@ -62,7 +62,7 @@ namespace MP.Server.Services
                 }
 
                 // Test database connection first
-                var dbTestResult = await TestDatabaseConnectionAsync(config.DatabaseConnectionString);
+                var dbTestResult = await TestDatabaseConnectionAsync(config.ConnectionString);
                 if (!dbTestResult.Success)
                 {
                     return dbTestResult;
@@ -183,7 +183,7 @@ namespace MP.Server.Services
         public int TcpPort { get; set; } = 443;
         public int UdpPort { get; set; } = 443;
         public bool UseTls { get; set; } = true;
-        public string DatabaseConnectionString { get; set; } = "Server=localhost;Database=mpserver;User=root;Password=yourpassword;Port=3306;";
+        public string ConnectionString { get; set; } = "Server=localhost;Database=mpserver;User=root;Password=yourpassword;Port=3306;";
     }
 
     /// <summary>
