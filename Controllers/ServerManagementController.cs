@@ -106,36 +106,7 @@ namespace MP.Server.Controllers
             }
         }
 
-        /// <summary>
-        /// Test database connection
-        /// </summary>
-        [HttpPost("test-database")]
-        public async Task<IActionResult> TestDatabase([FromBody] DatabaseTestRequest request)
-        {
-            try
-            {
-                if (request?.ConnectionString == null)
-                {
-                    return BadRequest(new { message = "Connection string is required" });
-                }
 
-                var result = await _serverManagement.TestDatabaseConnectionAsync(request.ConnectionString);
-                
-                if (result.Success)
-                {
-                    return Ok(result);
-                }
-                else
-                {
-                    return BadRequest(result);
-                }
-            }
-            catch (System.Exception ex)
-            {
-                _logger.LogError(ex, "Error testing database connection");
-                return StatusCode(500, new { message = "Error testing database connection" });
-            }
-        }
 
         /// <summary>
         /// Get server statistics (if server is running)
@@ -257,23 +228,7 @@ namespace MP.Server.Controllers
             }
         }
 
-        /// <summary>
-        /// Test database connection - used by dashboard
-        /// </summary>
-        [HttpPost("dashboard-test-db")]
-        public async Task<IActionResult> DashboardTestDatabase([FromForm] string connectionString)
-        {
-            try
-            {
-                var result = await _serverManagement.TestDatabaseConnectionAsync(connectionString);
-                return Json(new { success = result.Success, message = result.Message });
-            }
-            catch (System.Exception ex)
-            {
-                _logger.LogError(ex, "Error testing database connection");
-                return Json(new { success = false, message = $"Error testing database: {ex.Message}" });
-            }
-        }
+
 
         // Helper method to format uptime in a human readable format
         private string FormatUptime(TimeSpan timeSpan)
@@ -297,11 +252,5 @@ namespace MP.Server.Controllers
         }
     }
 
-    /// <summary>
-    /// Request model for database testing
-    /// </summary>
-    public class DatabaseTestRequest
-    {
-        public string ConnectionString { get; set; } = string.Empty;
-    }
+
 }
