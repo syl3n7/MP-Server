@@ -81,7 +81,7 @@ namespace MP.Server.Data
                 entity.HasIndex(e => e.UserId);
                 
                 entity.Property(e => e.Timestamp)
-                    .HasDefaultValueSql("datetime('now')");
+                    .HasDefaultValueSql("CURRENT_TIMESTAMP(6)");
             });
         }
     }
