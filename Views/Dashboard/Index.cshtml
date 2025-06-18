@@ -529,26 +529,35 @@
             $("#startServerButton").click(function() {
                 console.log("Start server button clicked");
                 const config = {
-                    tcpPort: parseInt($("#tcpPort").val()),
-                    udpPort: parseInt($("#udpPort").val()),
+                    tcpPort: parseInt($("#tcpPort").val()) || 443,
+                    udpPort: parseInt($("#udpPort").val()) || 443,
                     useTls: $("#useTls").is(':checked')
                 };
                 
                 console.log("Server config:", config);
                 $(this).prop('disabled', true).text('Starting...');
                 
-                $.post("/api/ServerManagement/dashboard-start", config, function(data) {
-                    console.log("Start server response:", data);
-                    showServerOperationResult(data.success, data.message);
-                    if (data.success) {
-                        updateServerControlButtons(true);
+                $.ajax({
+                    url: "/api/ServerManagement/dashboard-start",
+                    method: "POST",
+                    contentType: "application/json",
+                    data: JSON.stringify(config),
+                    success: function(data) {
+                        console.log("Start server response:", data);
+                        showServerOperationResult(data.success, data.message);
+                        if (data.success) {
+                            updateServerControlButtons(true);
+                        }
+                        loadServerStatus();
+                    },
+                    error: function(xhr, status, error) {
+                        console.error("Start server failed:", status, error);
+                        console.error("Response:", xhr.responseText);
+                        showServerOperationResult(false, "Failed to start server: " + (xhr.responseJSON?.message || error));
+                    },
+                    complete: function() {
+                        $("#startServerButton").prop('disabled', false).text('Start Server');
                     }
-                    loadServerStatus();
-                }).fail(function(xhr, status, error) {
-                    console.error("Start server failed:", status, error);
-                    showServerOperationResult(false, "Failed to start server");
-                }).always(function() {
-                    $("#startServerButton").prop('disabled', false).text('Start Server');
                 });
             });
             

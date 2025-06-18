@@ -68,7 +68,7 @@ public sealed class RacingServer : IHostedService, IDisposable
         
         // Initialize security system
         _securityConfig = securityConfig ?? new SecurityConfig();
-        _securityManager = new SecurityManager(_securityConfig, _logger);
+        _securityManager = new SecurityManager(_securityConfig, _logger, _dbLoggingService);
         
         if (_useTls && _serverCertificate == null)
         {

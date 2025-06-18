@@ -175,7 +175,7 @@ namespace MP.Server.Controllers
         /// Start server - used by dashboard
         /// </summary>
         [HttpPost("dashboard-start")]
-        public async Task<IActionResult> DashboardStartServer([FromForm] int tcpPort = 443, [FromForm] int udpPort = 443, [FromForm] bool useTls = true)
+        public async Task<IActionResult> DashboardStartServer([FromBody] DashboardServerConfig config)
         {
             try
             {
@@ -186,15 +186,15 @@ namespace MP.Server.Controllers
                     return Json(new { success = false, message = "Database connection string not configured in appsettings.json" });
                 }
 
-                var config = new ServerConfiguration
+                var serverConfig = new ServerConfiguration
                 {
                     ConnectionString = connectionString,
-                    TcpPort = tcpPort,
-                    UdpPort = udpPort,
-                    UseTls = useTls
+                    TcpPort = config.TcpPort,
+                    UdpPort = config.UdpPort,
+                    UseTls = config.UseTls
                 };
 
-                var result = await _serverManagement.StartServerAsync(config);
+                var result = await _serverManagement.StartServerAsync(serverConfig);
                 return Json(new { success = result.Success, message = result.Message });
             }
             catch (System.Exception ex)
@@ -246,5 +246,14 @@ namespace MP.Server.Controllers
         }
     }
 
+    /// <summary>
+    /// Dashboard server configuration model
+    /// </summary>
+    public class DashboardServerConfig
+    {
+        public int TcpPort { get; set; } = 443;
+        public int UdpPort { get; set; } = 443;
+        public bool UseTls { get; set; } = true;
+    }
 
 }
