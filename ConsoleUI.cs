@@ -277,7 +277,7 @@ public class ConsoleUI
         if (sessions.Count == 0)
         {
             Console.WriteLine("No active sessions to kick.");
-            return;
+            return Task.CompletedTask;
         }
         
         Console.WriteLine("Active Sessions:");
@@ -293,7 +293,7 @@ public class ConsoleUI
         if (string.IsNullOrEmpty(input) || input.ToLower() == "cancel")
         {
             Console.WriteLine("Kick cancelled.");
-            return;
+            return Task.CompletedTask;
         }
         
         if (int.TryParse(input, out int sessionIndex) && sessionIndex > 0 && sessionIndex <= sessions.Count)
