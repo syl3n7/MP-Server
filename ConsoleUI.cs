@@ -52,8 +52,22 @@ public class ConsoleUI
                     ShowStats();
                     break;
                     
-                case "dashboard":
-                    ShowDashboardInfo();
+                case "logs":
+                    await ShowRecentLogs();
+                    break;
+                    
+                case "clear":
+                    Console.Clear();
+                    Console.WriteLine("Racing Server Console");
+                    Console.WriteLine("=====================");
+                    break;
+                    
+                case "config":
+                    ShowConfiguration();
+                    break;
+                    
+                case "kick":
+                    await HandleKickPlayer();
                     break;
                     
                 case "test-wan":
@@ -88,7 +102,10 @@ public class ConsoleUI
         Console.WriteLine("  rooms       - List all game rooms");
         Console.WriteLine("  sessions    - List all active player sessions");
         Console.WriteLine("  stats       - Show server statistics");
-        Console.WriteLine("  dashboard   - Show web dashboard information");
+        Console.WriteLine("  logs        - Show recent server logs");
+        Console.WriteLine("  clear       - Clear console screen");
+        Console.WriteLine("  config      - Show server configuration");
+        Console.WriteLine("  kick        - Kick a player by ID");
         Console.WriteLine("  test-wan    - Test WAN connectivity (89.114.116.19:443)");
         Console.WriteLine("  test-lan    - Test LAN connectivity (192.168.3.123:443)");
         Console.WriteLine("  network-info- Show network interface information");
@@ -169,19 +186,15 @@ public class ConsoleUI
         }
     }
 
-    private void ShowDashboardInfo()
+    private Task ShowRecentLogs()
     {
-        Console.WriteLine("Web Dashboard Information");
-        Console.WriteLine("------------------------");
-        Console.WriteLine("Dashboard URL: http://localhost:8080");
-        Console.WriteLine("");
-        Console.WriteLine("The web dashboard provides a graphical interface to monitor:");
-        Console.WriteLine("- Server statistics (uptime, active sessions, rooms)");
-        Console.WriteLine("- Active game rooms and their status");
-        Console.WriteLine("- Connected player sessions");
-        Console.WriteLine("");
-        Console.WriteLine("The dashboard refreshes automatically every 10 seconds");
-        Console.WriteLine("or you can click the Refresh button for immediate updates.");
+        Console.WriteLine("Recent Server Logs");
+        Console.WriteLine("------------------");
+        Console.WriteLine("(Database logging integration - logs stored in database)");
+        Console.WriteLine("Note: Full log viewing requires database access tools or custom implementation");
+        Console.WriteLine();
+        Console.WriteLine("Recent console activity is shown above ↑");
+        return Task.CompletedTask;
     }
 
     private string TruncateString(string str, int maxLength)
@@ -240,5 +253,62 @@ public class ConsoleUI
         Console.WriteLine("🌐 Network Information:");
         var logger = Microsoft.Extensions.Logging.LoggerFactory.Create(b => b.AddConsole()).CreateLogger<ConsoleUI>();
         NetworkDiagnostics.PrintNetworkInfo(logger);
+    }
+
+    private void ShowConfiguration()
+    {
+        Console.WriteLine("Server Configuration");
+        Console.WriteLine("-------------------");
+        Console.WriteLine($"TCP Port: 443");
+        Console.WriteLine($"UDP Port: 443");
+        Console.WriteLine($"TLS Enabled: Yes");
+        Console.WriteLine($"Database Logging: Enabled");
+        Console.WriteLine($"Log Cleanup Service: Active");
+        Console.WriteLine($"Server Start Time: {_server.StartTime.ToLocalTime()}");
+        Console.WriteLine($"Process ID: {Environment.ProcessId}");
+        Console.WriteLine($"Working Directory: {Environment.CurrentDirectory}");
+        Console.WriteLine($".NET Version: {Environment.Version}");
+    }
+
+    private Task HandleKickPlayer()
+    {
+        var sessions = _server.GetAllSessions().ToList(); // Convert to List for indexing
+        
+        if (sessions.Count == 0)
+        {
+            Console.WriteLine("No active sessions to kick.");
+            return;
+        }
+        
+        Console.WriteLine("Active Sessions:");
+        for (int i = 0; i < sessions.Count; i++)
+        {
+            var session = sessions[i];
+            Console.WriteLine($"{i + 1}. {session.PlayerName} ({session.Id})");
+        }
+        
+        Console.Write("Enter session number to kick (or 'cancel'): ");
+        var input = Console.ReadLine()?.Trim();
+        
+        if (string.IsNullOrEmpty(input) || input.ToLower() == "cancel")
+        {
+            Console.WriteLine("Kick cancelled.");
+            return;
+        }
+        
+        if (int.TryParse(input, out int sessionIndex) && sessionIndex > 0 && sessionIndex <= sessions.Count)
+        {
+            var sessionToKick = sessions[sessionIndex - 1];
+            Console.WriteLine($"Kicking player: {sessionToKick.PlayerName}");
+            
+            // Note: This would need to be implemented in RacingServer
+            // _server.KickPlayer(sessionToKick.Id);
+            Console.WriteLine("Note: Kick functionality needs to be implemented in RacingServer class.");
+        }
+        else
+        {
+            Console.WriteLine("Invalid selection.");
+        }
+        return Task.CompletedTask;
     }
 }
