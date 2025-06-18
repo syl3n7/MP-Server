@@ -353,13 +353,11 @@ public sealed class RacingServer : IHostedService, IDisposable
 
     private async Task ProcessUdpPacketAsync(EndPoint remoteEndPoint, ReadOnlyMemory<byte> data, CancellationToken ct)
     {
+        PlayerSession? senderSession = null;
+        string? decryptedJson = null;
+        
         try
         {
-            JsonElement root = default;
-            PlayerSession? senderSession = null;
-            bool parseSuccessful = false;
-            string decryptedJson = null;
-            
             // First, try to detect if this is an encrypted packet by checking the length header
             if (data.Length >= 4)
             {
@@ -386,12 +384,7 @@ public sealed class RacingServer : IHostedService, IDisposable
                                 decryptedJson = session.UdpCrypto.Decrypt(encryptedData);
                                 if (!string.IsNullOrEmpty(decryptedJson))
                                 {
-                                    // Successfully decrypted, parse JSON
-                                    using JsonDocument document = JsonDocument.Parse(decryptedJson);
-                                    root = document.RootElement;
                                     senderSession = session;
-                                    parseSuccessful = true;
-                                    
                                     _logger.LogDebug("🔓 Successfully decrypted UDP packet from {RemoteEndPoint} for session {SessionId}: {DecryptedJson}", 
                                         remoteEndPoint, session.Id, decryptedJson);
                                     break;
@@ -408,39 +401,22 @@ public sealed class RacingServer : IHostedService, IDisposable
                 }
             }
             
-            // If decryption failed or this is a plain-text packet, try parsing as plain JSON
-            if (!parseSuccessful)
+            // Process the packet based on whether it was encrypted or plain text
+            string jsonToProcess;
+            if (!string.IsNullOrEmpty(decryptedJson))
             {
-                try
-                {
-                    string message = Encoding.UTF8.GetString(data.Span).TrimEnd('\n');
-                    _logger.LogDebug("🔍 Processing plain UDP packet from {RemoteEndPoint}: {Message}", remoteEndPoint, message);
-                    
-                    // Parse the JSON message
-                    using JsonDocument document = JsonDocument.Parse(message);
-                    root = document.RootElement;
-                    parseSuccessful = true;
-                }
-                catch (JsonException jsonEx)
-                {
-                    _logger.LogWarning("⚠️ Failed to parse UDP packet as JSON from {RemoteEndPoint}: {Error}", 
-                        remoteEndPoint, jsonEx.Message);
-                    
-                    // Log raw packet data for debugging (first 100 bytes)
-                    var rawData = data.ToArray();
-                    var debugData = rawData.Length > 100 ? rawData[..100] : rawData;
-                    _logger.LogDebug("🔍 Raw packet data (first 100 bytes): {RawData}", 
-                        Convert.ToHexString(debugData));
-                    return;
-                }
+                jsonToProcess = decryptedJson;
+            }
+            else
+            {
+                // Try as plain text
+                jsonToProcess = Encoding.UTF8.GetString(data.Span).TrimEnd('\n');
+                _logger.LogDebug("🔍 Processing plain UDP packet from {RemoteEndPoint}: {Message}", remoteEndPoint, jsonToProcess);
             }
             
-            // Only proceed if we successfully parsed the packet
-            if (!parseSuccessful)
-            {
-                _logger.LogWarning("⚠️ Failed to parse UDP packet from {RemoteEndPoint}", remoteEndPoint);
-                return;
-            }
+            // Parse and process JSON within using block
+            using JsonDocument document = JsonDocument.Parse(jsonToProcess);
+            var root = document.RootElement;
             
             // 🛡️ SECURITY VALIDATION - Validate packet before processing
             string clientId = "unknown";
@@ -526,7 +502,7 @@ public sealed class RacingServer : IHostedService, IDisposable
                 }
                 else if (commandType == "INPUT" && root.TryGetProperty("sessionId", out JsonElement inputSessionIdElement))
                 {
-                    // Process INPUT command (will be implemented)
+                    // Process INPUT command
                     string? sessionId = inputSessionIdElement.GetString();
                     if (!string.IsNullOrEmpty(sessionId) && root.TryGetProperty("roomId", out JsonElement roomIdElement))
                     {
@@ -550,6 +526,12 @@ public sealed class RacingServer : IHostedService, IDisposable
         catch (JsonException ex)
         {
             _logger.LogError(ex, "❌ Error parsing UDP JSON message from {RemoteEndPoint}", remoteEndPoint);
+            
+            // Log raw packet data for debugging (first 100 bytes)
+            var rawData = data.ToArray();
+            var debugData = rawData.Length > 100 ? rawData[..100] : rawData;
+            _logger.LogDebug("🔍 Raw packet data (first 100 bytes): {RawData}", 
+                Convert.ToHexString(debugData));
         }
         catch (Exception ex)
         {
