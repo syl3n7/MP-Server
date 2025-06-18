@@ -491,9 +491,17 @@ public sealed class RacingServer : IHostedService, IDisposable
                         // Find the room and update player info
                         if (_rooms.TryGetValue(session.CurrentRoomId, out GameRoom? room) && room != null)
                         {
-                            // Update player in room with new position info
-                            room.TryRemovePlayer(sessionId);
-                            room.TryAddPlayer(playerInfo);
+                            // Check if player is in room, if not add them
+                            if (!room.ContainsPlayer(sessionId))
+                            {
+                                room.TryAddPlayer(playerInfo);
+                                _logger.LogDebug("🔄 Added player {PlayerId} to room {RoomId} via UDP update", sessionId, session.CurrentRoomId);
+                            }
+                            else
+                            {
+                                // Just update position without remove/add cycle
+                                room.UpdatePlayerPosition(playerInfo);
+                            }
                             
                             // Broadcast to all other players in the same room
                             await BroadcastPositionUpdateAsync(playerInfo, session.CurrentRoomId, sessionId);

@@ -132,6 +132,31 @@ public sealed class GameRoom
         return _players.ContainsKey(playerId);
     }
     
+    public bool UpdatePlayerPosition(PlayerInfo updatedPlayerInfo)
+    {
+        if (_players.TryGetValue(updatedPlayerInfo.Id, out var existingPlayer))
+        {
+            // Create new PlayerInfo with updated position/rotation but keeping existing spawn position
+            var newPlayerInfo = new PlayerInfo(
+                existingPlayer.Id,
+                existingPlayer.Name,
+                updatedPlayerInfo.UdpEndpoint, // Update UDP endpoint
+                updatedPlayerInfo.Position,    // Update position
+                updatedPlayerInfo.Rotation     // Update rotation
+            );
+            
+            // Replace the player info in the dictionary
+            _players.TryUpdate(updatedPlayerInfo.Id, newPlayerInfo, existingPlayer);
+            
+            _logger?.LogDebug("Updated position for player {PlayerId} in room {RoomId}", 
+                updatedPlayerInfo.Id, Id);
+            
+            return true;
+        }
+        
+        return false;
+    }
+    
     public int PlayerCount => _players.Count;
 
     public void StartGame()
