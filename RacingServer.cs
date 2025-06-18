@@ -365,9 +365,10 @@ public sealed class RacingServer : IHostedService, IDisposable
                 var expectedLength = BitConverter.ToInt32(packetData, 0);
                 
                 // If the length header matches the actual encrypted data length, this is likely encrypted
-                if (expectedLength > 0 && expectedLength == packetData.Length - 4)
+                // Also validate that the expected length is reasonable (not negative, not too large)
+                if (expectedLength > 0 && expectedLength <= packetData.Length - 4 && expectedLength < 1024)
                 {
-                    _logger.LogDebug("🔍 Detected encrypted UDP packet from {RemoteEndPoint}, attempting decryption", remoteEndPoint);
+                    _logger.LogDebug("🔍 Detected encrypted UDP packet from {RemoteEndPoint} (expected length: {ExpectedLength}), attempting decryption", remoteEndPoint, expectedLength);
                     
                     // Try to decrypt with each authenticated session's crypto
                     foreach (var session in _sessions.Values)
@@ -399,6 +400,15 @@ public sealed class RacingServer : IHostedService, IDisposable
                         }
                     }
                 }
+                else if (expectedLength > 1024)
+                {
+                    _logger.LogWarning("⚠️ Received UDP packet from {RemoteEndPoint} with suspiciously large length header ({ExpectedLength}), rejecting", remoteEndPoint, expectedLength);
+                    return;
+                }
+                else if (expectedLength < 0)
+                {
+                    _logger.LogDebug("🔍 UDP packet from {RemoteEndPoint} doesn't appear to be encrypted (negative length header), will try as plain text", remoteEndPoint);
+                }
             }
             
             // Process the packet based on whether it was encrypted or plain text
@@ -406,10 +416,25 @@ public sealed class RacingServer : IHostedService, IDisposable
             if (!string.IsNullOrEmpty(decryptedJson))
             {
                 jsonToProcess = decryptedJson;
+                _logger.LogDebug("🔓 Processing decrypted UDP packet from {RemoteEndPoint}: {Message}", remoteEndPoint, jsonToProcess);
             }
             else
             {
-                // Try as plain text
+                // Check if this looked like an encrypted packet that we failed to decrypt
+                if (data.Length >= 4)
+                {
+                    var packetData = data.ToArray();
+                    var expectedLength = BitConverter.ToInt32(packetData, 0);
+                    
+                    // If the length header suggests this was encrypted but we couldn't decrypt it, reject it
+                    if (expectedLength > 0 && expectedLength <= packetData.Length - 4)
+                    {
+                        _logger.LogWarning("🚫 Received encrypted UDP packet from {RemoteEndPoint} but could not decrypt with any session key. Packet rejected.", remoteEndPoint);
+                        return;
+                    }
+                }
+                
+                // Try as plain text - this should only happen for development/testing
                 jsonToProcess = Encoding.UTF8.GetString(data.Span).TrimEnd('\n');
                 _logger.LogDebug("🔍 Processing plain UDP packet from {RemoteEndPoint}: {Message}", remoteEndPoint, jsonToProcess);
             }
