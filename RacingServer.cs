@@ -191,8 +191,8 @@ public sealed class RacingServer : IHostedService, IDisposable
                         {
                             await _dbLoggingService.LogConnectionEventAsync(
                                 eventType: "Connect",
-                                sessionId: "pending", // Will be updated when session is created
-                                ipAddress: endpoint?.Address?.ToString() ?? "unknown",
+                                sessionId: "pending" // Will be updated when session is created
+                                , ipAddress: endpoint?.Address?.ToString() ?? "unknown",
                                 connectionType: "TCP",
                                 usedTls: _useTls
                             );
@@ -413,32 +413,35 @@ public sealed class RacingServer : IHostedService, IDisposable
             
             // Process the packet based on whether it was encrypted or plain text
             string jsonToProcess;
+            bool looksEncrypted = false;
+            if (data.Length >= 4)
+            {
+                var packetData = data.ToArray();
+                var expectedLength = BitConverter.ToInt32(packetData, 0);
+                if (expectedLength > 0 && expectedLength <= packetData.Length - 4 && expectedLength < 1024)
+                {
+                    looksEncrypted = true;
+                }
+            }
+
             if (!string.IsNullOrEmpty(decryptedJson))
             {
                 jsonToProcess = decryptedJson;
                 _logger.LogDebug("🔓 Processing decrypted UDP packet from {RemoteEndPoint}: {Message}", remoteEndPoint, jsonToProcess);
             }
+            else if (looksEncrypted)
+            {
+                // If it looks encrypted but we couldn't decrypt, reject it
+                _logger.LogWarning("🚫 Received encrypted UDP packet from {RemoteEndPoint} but could not decrypt with any session key. Packet rejected.", remoteEndPoint);
+                return;
+            }
             else
             {
-                // Check if this looked like an encrypted packet that we failed to decrypt
-                if (data.Length >= 4)
-                {
-                    var packetData = data.ToArray();
-                    var expectedLength = BitConverter.ToInt32(packetData, 0);
-                    
-                    // If the length header suggests this was encrypted but we couldn't decrypt it, reject it
-                    if (expectedLength > 0 && expectedLength <= packetData.Length - 4)
-                    {
-                        _logger.LogWarning("🚫 Received encrypted UDP packet from {RemoteEndPoint} but could not decrypt with any session key. Packet rejected.", remoteEndPoint);
-                        return;
-                    }
-                }
-                
-                // Try as plain text - this should only happen for development/testing
+                // Only try as plain text if it does NOT look encrypted
                 jsonToProcess = Encoding.UTF8.GetString(data.Span).TrimEnd('\n');
                 _logger.LogDebug("🔍 Processing plain UDP packet from {RemoteEndPoint}: {Message}", remoteEndPoint, jsonToProcess);
             }
-            
+
             // Parse and process JSON within using block
             using JsonDocument document = JsonDocument.Parse(jsonToProcess);
             var root = document.RootElement;
@@ -1013,7 +1016,7 @@ public sealed class RacingServer : IHostedService, IDisposable
             
             foreach (var session in _sessions.Values)
             {
-                if (session?.CurrentRoomId == roomId && session.Id != senderId)
+                if session?.CurrentRoomId == roomId && session.Id != senderId)
                 {
                     tasks.Add(session.SendJsonAsync(chatMessage, CancellationToken.None));
                 }
