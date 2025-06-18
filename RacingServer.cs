@@ -358,32 +358,51 @@ public sealed class RacingServer : IHostedService, IDisposable
             JsonElement root = default;
             PlayerSession? senderSession = null;
             bool parseSuccessful = false;
+            string decryptedJson = null;
             
-            // Check if this looks like an encrypted packet (has 4-byte length header)
+            // First, try to detect if this is an encrypted packet by checking the length header
             if (data.Length >= 4)
             {
-                // Try to find the session by examining UDP endpoints of existing sessions
-                foreach (var session in _sessions.Values)
+                var packetData = data.ToArray();
+                var expectedLength = BitConverter.ToInt32(packetData, 0);
+                
+                // If the length header matches the actual encrypted data length, this is likely encrypted
+                if (expectedLength > 0 && expectedLength == packetData.Length - 4)
                 {
-                    if (session?.IsAuthenticated == true && session.UdpCrypto != null)
+                    _logger.LogDebug("🔍 Detected encrypted UDP packet from {RemoteEndPoint}, attempting decryption", remoteEndPoint);
+                    
+                    // Try to decrypt with each authenticated session's crypto
+                    foreach (var session in _sessions.Values)
                     {
-                        // Try to decrypt and parse the packet with this session's crypto
-                        try
+                        if (session?.IsAuthenticated == true && session.UdpCrypto != null)
                         {
-                            var decryptedData = session.UdpCrypto.ParsePacket<JsonElement>(data.ToArray());
-                            if (decryptedData.ValueKind != JsonValueKind.Undefined)
+                            try
                             {
-                                root = decryptedData;
-                                senderSession = session;
-                                parseSuccessful = true;
-                                _logger.LogDebug("🔓 Successfully decrypted UDP packet from {RemoteEndPoint} for session {SessionId}", 
-                                    remoteEndPoint, session.Id);
-                                break;
+                                // Extract encrypted data (skip 4-byte length header)
+                                var encryptedData = new byte[expectedLength];
+                                Array.Copy(packetData, 4, encryptedData, 0, expectedLength);
+                                
+                                // Try to decrypt with this session's key
+                                decryptedJson = session.UdpCrypto.Decrypt(encryptedData);
+                                if (!string.IsNullOrEmpty(decryptedJson))
+                                {
+                                    // Successfully decrypted, parse JSON
+                                    using JsonDocument document = JsonDocument.Parse(decryptedJson);
+                                    root = document.RootElement;
+                                    senderSession = session;
+                                    parseSuccessful = true;
+                                    
+                                    _logger.LogDebug("🔓 Successfully decrypted UDP packet from {RemoteEndPoint} for session {SessionId}: {DecryptedJson}", 
+                                        remoteEndPoint, session.Id, decryptedJson);
+                                    break;
+                                }
                             }
-                        }
-                        catch
-                        {
-                            // Not encrypted with this session's key, continue
+                            catch (Exception ex)
+                            {
+                                // Not encrypted with this session's key, continue trying others
+                                _logger.LogDebug("❌ Failed to decrypt UDP packet with session {SessionId}: {Error}", 
+                                    session.Id, ex.Message);
+                            }
                         }
                     }
                 }
@@ -392,13 +411,28 @@ public sealed class RacingServer : IHostedService, IDisposable
             // If decryption failed or this is a plain-text packet, try parsing as plain JSON
             if (!parseSuccessful)
             {
-                string message = Encoding.UTF8.GetString(data.Span).TrimEnd('\n');
-                _logger.LogDebug("🔍 Processing plain UDP packet from {RemoteEndPoint}: {Message}", remoteEndPoint, message);
-                
-                // Parse the JSON message
-                using JsonDocument document = JsonDocument.Parse(message);
-                root = document.RootElement;
-                parseSuccessful = true;
+                try
+                {
+                    string message = Encoding.UTF8.GetString(data.Span).TrimEnd('\n');
+                    _logger.LogDebug("🔍 Processing plain UDP packet from {RemoteEndPoint}: {Message}", remoteEndPoint, message);
+                    
+                    // Parse the JSON message
+                    using JsonDocument document = JsonDocument.Parse(message);
+                    root = document.RootElement;
+                    parseSuccessful = true;
+                }
+                catch (JsonException jsonEx)
+                {
+                    _logger.LogWarning("⚠️ Failed to parse UDP packet as JSON from {RemoteEndPoint}: {Error}", 
+                        remoteEndPoint, jsonEx.Message);
+                    
+                    // Log raw packet data for debugging (first 100 bytes)
+                    var rawData = data.ToArray();
+                    var debugData = rawData.Length > 100 ? rawData[..100] : rawData;
+                    _logger.LogDebug("🔍 Raw packet data (first 100 bytes): {RawData}", 
+                        Convert.ToHexString(debugData));
+                    return;
+                }
             }
             
             // Only proceed if we successfully parsed the packet
@@ -415,12 +449,39 @@ public sealed class RacingServer : IHostedService, IDisposable
                 clientId = sessionIdElement.GetString() ?? "unknown";
             }
             
-            // Validate the packet using security manager
+            // For security validation, use the original raw data (not decrypted)
+            // This ensures rate limiting and security checks work on all packets
             var validationResult = _securityManager.ValidateUdpPacket(clientId, data.ToArray(), DateTime.UtcNow);
             if (!validationResult.IsValid)
             {
                 _logger.LogWarning("🚫 Security validation failed for UDP packet from {RemoteEndPoint}: {Reason}", 
                     remoteEndPoint, validationResult.Reason);
+                
+                // If this was a successfully decrypted packet, we know which session sent it
+                if (senderSession != null)
+                {
+                    _logger.LogWarning("🚫 Kicking session {SessionId} for security violation: {Reason}", 
+                        senderSession.Id, validationResult.Reason);
+                    
+                    // Log security event
+                    _ = Task.Run(async () =>
+                    {
+                        try
+                        {
+                            if (_dbLoggingService != null)
+                            {
+                                await _dbLoggingService.LogSecurityEventAsync(
+                                    "UDP_SECURITY_VIOLATION",
+                                    remoteEndPoint.ToString() ?? "unknown",
+                                    3, // High severity
+                                    $"Session {senderSession.Id} kicked for UDP security violation: {validationResult.Reason}",
+                                    senderSession.Id
+                                );
+                            }
+                        }
+                        catch { /* Ignore logging errors */ }
+                    });
+                }
                 return; // Reject the packet
             }
             
@@ -515,14 +576,32 @@ public sealed class RacingServer : IHostedService, IDisposable
                 
                 try
                 {
-                    // Create the input message - forward exactly what we received
-                    var inputMsg = JsonSerializer.Serialize(root) + "\n";
-                    byte[] bytes = Encoding.UTF8.GetBytes(inputMsg);
+                    // Create input message object (not string)
+                    var inputMsg = JsonSerializer.Deserialize<object>(root.GetRawText());
                     
-                    // Send the input to the player
-                    await _udpListener!.SendToAsync(bytes, player.UdpEndpoint);
-                    
-                    _logger.LogDebug("📤 Broadcast input from {SenderId} to {ReceiverId}", sessionId, player.Id);
+                    // Find the receiving player's session to check if they use UDP encryption
+                    if (_sessions.TryGetValue(player.Id, out PlayerSession? receiverSession) && 
+                        receiverSession?.UdpCrypto != null && receiverSession.IsAuthenticated)
+                    {
+                        // Send encrypted UDP packet
+                        byte[] encryptedPacket = receiverSession.UdpCrypto.CreatePacket(inputMsg);
+                        
+                        await _udpListener!.SendToAsync(encryptedPacket, player.UdpEndpoint);
+                        
+                        _logger.LogDebug("📤🔐 Broadcast encrypted input from {SenderId} to {ReceiverId}", 
+                            sessionId, player.Id);
+                    }
+                    else
+                    {
+                        // Send plain text UDP packet for non-encrypted clients
+                        var inputMsgStr = JsonSerializer.Serialize(inputMsg) + "\n";
+                        byte[] bytes = Encoding.UTF8.GetBytes(inputMsgStr);
+                        
+                        await _udpListener!.SendToAsync(bytes, player.UdpEndpoint);
+                        
+                        _logger.LogDebug("📤 Broadcast plain input from {SenderId} to {ReceiverId}", 
+                            sessionId, player.Id);
+                    }
                 }
                 catch (Exception ex)
                 {
@@ -584,16 +663,35 @@ public sealed class RacingServer : IHostedService, IDisposable
                         rotation = new { x = playerInfo.Rotation.X, y = playerInfo.Rotation.Y, z = playerInfo.Rotation.Z, w = playerInfo.Rotation.W }
                     };
                     
-                    string json = JsonSerializer.Serialize(updateMsg) + "\n";
-                    byte[] bytes = Encoding.UTF8.GetBytes(json);
-                    
-                    // Send the update to the player
-                    if (_udpListener != null)
+                    // Find the receiving player's session to check if they use UDP encryption
+                    if (_sessions.TryGetValue(player.Id, out PlayerSession? receiverSession) && 
+                        receiverSession?.UdpCrypto != null && receiverSession.IsAuthenticated)
                     {
-                        await _udpListener.SendToAsync(bytes, player.UdpEndpoint);
+                        // Send encrypted UDP packet
+                        byte[] encryptedPacket = receiverSession.UdpCrypto.CreatePacket(updateMsg);
+                        
+                        if (_udpListener != null)
+                        {
+                            await _udpListener.SendToAsync(encryptedPacket, player.UdpEndpoint);
+                        }
+                        
+                        _logger.LogDebug("📤🔐 Broadcast encrypted position update from {SenderId} to {ReceiverId}", 
+                            senderId, player.Id);
                     }
-                    
-                    _logger.LogDebug("📤 Broadcast position update from {SenderId} to {ReceiverId}", senderId, player.Id);
+                    else
+                    {
+                        // Send plain text UDP packet for non-encrypted clients
+                        string json = JsonSerializer.Serialize(updateMsg) + "\n";
+                        byte[] bytes = Encoding.UTF8.GetBytes(json);
+                        
+                        if (_udpListener != null)
+                        {
+                            await _udpListener.SendToAsync(bytes, player.UdpEndpoint);
+                        }
+                        
+                        _logger.LogDebug("📤 Broadcast plain position update from {SenderId} to {ReceiverId}", 
+                            senderId, player.Id);
+                    }
                 }
                 catch (Exception ex)
                 {
