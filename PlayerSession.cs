@@ -72,13 +72,16 @@ public sealed class PlayerSession : IDisposable
                 {
                     try
                     {
-                        await _server.DatabaseLoggingService?.LogSecurityEventAsync(
-                            "TLS_HANDSHAKE_FAILED", 
-                            clientEndpoint,
-                            2, // Medium severity
-                            $"TLS handshake failed - client may be using outdated protocol: {ex.Message}",
-                            Id
-                        );
+                        if (_server.DatabaseLoggingService != null)
+                        {
+                            await _server.DatabaseLoggingService.LogSecurityEventAsync(
+                                "TLS_HANDSHAKE_FAILED", 
+                                clientEndpoint,
+                                2, // Medium severity
+                                $"TLS handshake failed - client may be using outdated protocol: {ex.Message}",
+                                Id
+                            );
+                        }
                     }
                     catch
                     {
@@ -524,6 +527,32 @@ public sealed class PlayerSession : IDisposable
                     else
                     {
                         await SendJsonAsync(new { command = "ERROR", message = "Password is required for authentication." }, ct);
+                    }
+                    break;
+
+                case "MESSAGE":
+                    // Handle chat messages
+                    if (jsonMessage.TryGetProperty("message", out var chatMessageElement))
+                    {
+                        var chatMessage = chatMessageElement.GetString() ?? string.Empty;
+                        
+                        if (!string.IsNullOrEmpty(chatMessage) && !string.IsNullOrEmpty(CurrentRoomId))
+                        {
+                            _server.Logger.LogInformation("💬 Player {SessionId} ({Name}) sent message: {Message}", 
+                                Id, PlayerName, chatMessage);
+                            
+                            // Broadcast message to all players in the same room
+                            await _server.BroadcastChatMessageAsync(CurrentRoomId, PlayerName, chatMessage, Id);
+                            await SendJsonAsync(new { command = "MESSAGE_OK" }, ct);
+                        }
+                        else
+                        {
+                            await SendJsonAsync(new { command = "ERROR", message = "Empty message or not in a room." }, ct);
+                        }
+                    }
+                    else
+                    {
+                        await SendJsonAsync(new { command = "ERROR", message = "Message content is required." }, ct);
                     }
                     break;
 

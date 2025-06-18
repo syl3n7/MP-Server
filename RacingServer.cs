@@ -563,7 +563,7 @@ public sealed class RacingServer : IHostedService, IDisposable
                     
                     // Find the receiving player's session to check if they use UDP encryption
                     if (_sessions.TryGetValue(player.Id, out PlayerSession? receiverSession) && 
-                        receiverSession?.UdpCrypto != null && receiverSession.IsAuthenticated)
+                        receiverSession?.UdpCrypto != null && receiverSession.IsAuthenticated && inputMsg != null)
                     {
                         // Send encrypted UDP packet
                         byte[] encryptedPacket = receiverSession.UdpCrypto.CreatePacket(inputMsg);
@@ -952,5 +952,50 @@ public sealed class RacingServer : IHostedService, IDisposable
         
         _logger.LogInformation("🔐 Generated certificate with subject: {Subject}, public IP: {IP}", subjectName, publicIp);
         return secureCertificate;
+    }
+
+    /// <summary>
+    /// Broadcasts a chat message to all players in a specific room
+    /// </summary>
+    public async Task BroadcastChatMessageAsync(string roomId, string senderName, string message, string senderId)
+    {
+        try
+        {
+            if (!_rooms.TryGetValue(roomId, out var room) || room == null)
+            {
+                _logger.LogWarning("⚠️ Attempted to broadcast chat message to non-existent room {RoomId}", roomId);
+                return;
+            }
+
+            var chatMessage = new
+            {
+                command = "CHAT",
+                roomId = roomId,
+                senderName = senderName,
+                message = message,
+                timestamp = DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ss")
+            };
+
+            var tasks = new List<Task>();
+            
+            foreach (var session in _sessions.Values)
+            {
+                if (session?.CurrentRoomId == roomId && session.Id != senderId)
+                {
+                    tasks.Add(session.SendJsonAsync(chatMessage, CancellationToken.None));
+                }
+            }
+
+            if (tasks.Count > 0)
+            {
+                await Task.WhenAll(tasks);
+                _logger.LogDebug("💬 Broadcasted chat message from {SenderName} to {PlayerCount} players in room {RoomId}", 
+                    senderName, tasks.Count, roomId);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "❌ Error broadcasting chat message in room {RoomId}", roomId);
+        }
     }
 }

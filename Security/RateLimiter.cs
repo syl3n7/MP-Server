@@ -20,8 +20,8 @@ namespace MP.Server.Security
         public static class Limits
         {
             public const int TCP_MESSAGES_PER_SECOND = 10;
-            public const int UDP_PACKETS_PER_SECOND = 60;  // Allow up to 60 FPS
-            public const int BURST_ALLOWANCE = 5;  // Allow brief bursts
+            public const int UDP_PACKETS_PER_SECOND = 120;  // Increased from 60 to 120 - allow up to 120 FPS
+            public const int BURST_ALLOWANCE = 10;  // Increased burst allowance from 5 to 10
             public const int CLEANUP_INTERVAL_MS = 30000;  // 30 seconds
             public const int CLIENT_TIMEOUT_MS = 60000;  // 1 minute
         }

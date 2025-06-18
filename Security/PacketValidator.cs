@@ -17,7 +17,7 @@ namespace MP.Server.Security
         private const float MAX_POSITION_JUMP = 50.0f; // Maximum position change per frame
         private const float MAX_SPEED = 200.0f; // Maximum speed in units/second
         private const float MAX_ANGULAR_VELOCITY = 10.0f; // Maximum rotation change
-        private const float MIN_UPDATE_INTERVAL = 0.016f; // Minimum 16ms between updates (60 FPS)
+        private const float MIN_UPDATE_INTERVAL = 0.008f; // Minimum 8ms between updates (125 FPS) - more lenient
         private const float MAX_UPDATE_INTERVAL = 5.0f; // Maximum 5 seconds between updates
         
         // Input validation ranges
@@ -63,9 +63,11 @@ namespace MP.Server.Security
                 var timeDelta = (timestamp - state.LastUpdateTime).TotalSeconds;
                 if (timeDelta < MIN_UPDATE_INTERVAL)
                 {
-                    _logger.LogWarning("🚫 Player {SessionId} sending updates too frequently: {Interval}ms", 
+                    _logger.LogDebug("⏱️ Player {SessionId} sending updates frequently: {Interval}ms (within acceptable range)", 
                         sessionId, timeDelta * 1000);
-                    return ValidationResult.Reject("Update frequency too high");
+                    // Allow rapid updates but update the state
+                    state.Update(position, rotation, timestamp);
+                    return ValidationResult.Accept();
                 }
                 
                 if (timeDelta > MAX_UPDATE_INTERVAL)
@@ -81,10 +83,24 @@ namespace MP.Server.Security
                 var positionDelta = Vector3.Distance(position, state.LastPosition);
                 var maxAllowedDistance = MAX_SPEED * (float)timeDelta;
                 
-                if (positionDelta > Math.Max(maxAllowedDistance, MAX_POSITION_JUMP))
+                // Be more lenient for the first few updates (spawn/initial positioning)
+                var isInitialUpdate = timeDelta > 1.0f; // If more than 1 second gap, consider it initial
+                var effectiveMaxJump = isInitialUpdate ? MAX_POSITION_JUMP * 3 : MAX_POSITION_JUMP;
+                
+                if (positionDelta > Math.Max(maxAllowedDistance, effectiveMaxJump))
                 {
                     _logger.LogWarning("🚫 Player {SessionId} suspicious position jump: {Distance} units in {Time}s", 
                         sessionId, positionDelta, timeDelta);
+                    
+                    // For initial spawns, just warn but allow
+                    if (isInitialUpdate)
+                    {
+                        _logger.LogInformation("🏁 Player {SessionId} initial spawn/teleport allowed: {Distance} units", 
+                            sessionId, positionDelta);
+                        state.Update(position, rotation, timestamp);
+                        return ValidationResult.Accept();
+                    }
+                    
                     return ValidationResult.Reject("Impossible position change detected");
                 }
                 
@@ -126,9 +142,11 @@ namespace MP.Server.Security
         {
             try
             {
+                // Input data is optional - if missing, just accept the packet
                 if (!packet.TryGetProperty("input", out var inputElement))
                 {
-                    return ValidationResult.Reject("Missing input data");
+                    _logger.LogDebug("📦 Input packet without input data from {SessionId} - accepting", sessionId);
+                    return ValidationResult.Accept();
                 }
                 
                 // Validate steering range

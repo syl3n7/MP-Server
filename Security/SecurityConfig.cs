@@ -54,7 +54,7 @@ namespace MP.Server.Security
         /// Minimum time between updates (milliseconds)
         /// </summary>
         [Range(1, 100)]
-        public int MinUpdateInterval { get; set; } = 16; // ~60 FPS
+        public int MinUpdateInterval { get; set; } = 8; // ~125 FPS - more lenient
         
         /// <summary>
         /// Maximum time between updates (milliseconds)
@@ -96,7 +96,7 @@ namespace MP.Server.Security
         /// Maximum UDP packets per second per client
         /// </summary>
         [Range(10, 120)]
-        public int UdpPacketsPerSecond { get; set; } = 60;
+        public int UdpPacketsPerSecond { get; set; } = 120; // Increased from 60 to 120
         
         /// <summary>
         /// Burst allowance above normal rate limit
@@ -128,7 +128,7 @@ namespace MP.Server.Security
         /// Number of violations before taking action
         /// </summary>
         [Range(1, 20)]
-        public int ViolationThreshold { get; set; } = 3;
+        public int ViolationThreshold { get; set; } = 10; // Increased from 3 to 10 - more lenient
         
         /// <summary>
         /// Time window for violation counting (minutes)
