@@ -217,4 +217,31 @@ namespace MP.Server.Services
     }
     
     #endregion
+
+    #region User Management Requests
+
+    public class BanUserRequest
+    {
+        public int UserId { get; set; }
+        public bool IsBanned { get; set; }
+        public string? Reason { get; set; }
+        public int? BanDurationDays { get; set; }
+    }
+    
+    public class UnbanUserRequest
+    {
+        public int UserId { get; set; }
+    }
+    
+    public class ForcePasswordResetRequest
+    {
+        public int UserId { get; set; }
+    }
+    
+    public class DeleteUserRequest
+    {
+        public int UserId { get; set; }
+    }
+
+    #endregion
 }

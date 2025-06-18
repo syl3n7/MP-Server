@@ -8,6 +8,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.EntityFrameworkCore;
 using MP.Server.Data;
 using MP.Server.Services;
+using MP.Server.Logging;
 
 // Setup cancellation tokens for clean shutdown
 var serverCts = new CancellationTokenSource();
@@ -19,6 +20,9 @@ var builder = WebApplication.CreateBuilder(args);
 // Add services to the container
 builder.Services.AddControllersWithViews();
 builder.Logging.AddConsole();
+
+// Add database logging service
+builder.Services.AddScoped<DatabaseLoggingService>();
 
 // Add Entity Framework with MariaDB
 var connectionString = builder.Configuration.GetConnectionString("DefaultConnection") 
@@ -32,6 +36,9 @@ builder.Services.AddScoped<EmailService>();
 
 // Register server management service
 builder.Services.AddSingleton<ServerManagementService>();
+
+// Register background services
+builder.Services.AddHostedService<LogCleanupService>();
 
 // Build the web application
 var app = builder.Build();

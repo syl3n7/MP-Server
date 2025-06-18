@@ -264,13 +264,4 @@ namespace MP.Server.Controllers
         
         #endregion
     }
-    
-    /// <summary>
-    /// Request model for banning users
-    /// </summary>
-    public class BanUserRequest
-    {
-        public bool IsBanned { get; set; }
-        public string? Reason { get; set; }
-    }
 }

@@ -18,6 +18,7 @@ using System.IO;
 using MP.Server;
 using MP.Server.Diagnostics;
 using MP.Server.Security;
+using MP.Server.Services;
 
 public sealed class RacingServer : IHostedService, IDisposable
 {
@@ -30,6 +31,7 @@ public sealed class RacingServer : IHostedService, IDisposable
     // Security system
     private readonly SecurityManager _securityManager;
     private readonly SecurityConfig _securityConfig;
+    private readonly DatabaseLoggingService? _dbLoggingService;
     
     // Networking
     private Socket? _tcpListener;
@@ -55,13 +57,14 @@ public sealed class RacingServer : IHostedService, IDisposable
     // Security system access
     public SecurityManager SecurityManager => _securityManager;
     
-    public RacingServer(int tcpPort, int udpPort, ILogger<RacingServer>? logger = null, bool useTls = true, X509Certificate2? certificate = null, SecurityConfig? securityConfig = null)
+    public RacingServer(int tcpPort, int udpPort, ILogger<RacingServer>? logger = null, bool useTls = true, X509Certificate2? certificate = null, SecurityConfig? securityConfig = null, DatabaseLoggingService? dbLoggingService = null)
     {
         _tcpPort = tcpPort;
         _udpPort = udpPort;
         _logger = logger ?? LoggerFactory.Create(b => b.AddConsole()).CreateLogger<RacingServer>();
         _useTls = useTls;
         _serverCertificate = certificate ?? GenerateOrLoadCertificate();
+        _dbLoggingService = dbLoggingService;
         
         // Initialize security system
         _securityConfig = securityConfig ?? new SecurityConfig();
@@ -75,6 +78,23 @@ public sealed class RacingServer : IHostedService, IDisposable
         
         _logger.LogInformation("🔒 Server initialized with {Security} mode", _useTls ? "TLS/SSL" : "Plain text");
         _logger.LogInformation("🛡️ Security system initialized with comprehensive protection");
+        
+        // Log server initialization to database
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                if (_dbLoggingService != null)
+                {
+                    await _dbLoggingService.LogServerEventAsync(
+                        level: "Info",
+                        category: "RacingServer",
+                        message: $"Server initialized with {(_useTls ? "TLS/SSL" : "Plain text")} mode on ports TCP:{tcpPort}, UDP:{udpPort}"
+                    );
+                }
+            }
+            catch { /* Ignore logging errors during startup */ }
+        });
     }
 
     public async Task StartAsync(CancellationToken cancellationToken = default)
@@ -104,6 +124,23 @@ public sealed class RacingServer : IHostedService, IDisposable
         _logger.LogInformation("✅ Server started on TCP:{TcpPort} UDP:{UdpPort}", _tcpPort, _udpPort);
         _logger.LogInformation("🔗 Server binding: 0.0.0.0:{Port} ({Security})", _tcpPort, _useTls ? "TLS/SSL" : "Plain");
         _logger.LogInformation("📡 Clients should connect to: {PublicIP}:{Port}", "89.114.116.19", _tcpPort);
+        
+        // Log server start to database
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                if (_dbLoggingService != null)
+                {
+                    await _dbLoggingService.LogServerEventAsync(
+                        level: "Info",
+                        category: "RacingServer",
+                        message: $"Server started successfully on TCP:{_tcpPort} UDP:{_udpPort}"
+                    );
+                }
+            }
+            catch { /* Ignore logging errors */ }
+        });
         
         await Task.CompletedTask; // Add await to make this truly async
     }
@@ -144,6 +181,25 @@ public sealed class RacingServer : IHostedService, IDisposable
                 _logger.LogInformation("🔌 New connection from {ClientIP}:{ClientPort}", 
                     endpoint?.Address, endpoint?.Port);
                 
+                // Log connection to database
+                _ = Task.Run(async () =>
+                {
+                    try
+                    {
+                        if (_dbLoggingService != null)
+                        {
+                            await _dbLoggingService.LogConnectionEventAsync(
+                                eventType: "Connect",
+                                sessionId: "pending", // Will be updated when session is created
+                                ipAddress: endpoint?.Address?.ToString() ?? "unknown",
+                                connectionType: "TCP",
+                                usedTls: _useTls
+                            );
+                        }
+                    }
+                    catch { /* Ignore logging errors */ }
+                });
+                
                 // Create a separate task but properly await it with ConfigureAwait(false)
                 // This allows the server to continue accepting new connections while handling this one
                 _ = HandleTcpConnectionAsync(socket, ct)
@@ -175,18 +231,78 @@ public sealed class RacingServer : IHostedService, IDisposable
                 _sessions.TryAdd(session.Id, session);
                 _logger.LogInformation("👤 Player session {SessionId} created from {ClientIP}:{ClientPort} ({Security})", 
                     session.Id, endpoint?.Address, endpoint?.Port, _useTls ? "TLS" : "Plain");
+                
+                // Log session creation to database
+                _ = Task.Run(async () =>
+                {
+                    try
+                    {
+                        if (_dbLoggingService != null)
+                        {
+                            await _dbLoggingService.LogConnectionEventAsync(
+                                eventType: "Connect",
+                                sessionId: session.Id,
+                                ipAddress: endpoint?.Address?.ToString() ?? "unknown",
+                                connectionType: "TCP",
+                                usedTls: _useTls
+                            );
+                        }
+                    }
+                    catch { /* Ignore logging errors */ }
+                });
                     
                 await session.ProcessMessagesAsync(ct).ConfigureAwait(false);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
                 _logger.LogError(ex, "❌ Error processing TCP connection for session {SessionId}", session.Id);
+                
+                // Log error to database
+                _ = Task.Run(async () =>
+                {
+                    try
+                    {
+                        if (_dbLoggingService != null)
+                        {
+                            await _dbLoggingService.LogServerEventAsync(
+                                level: "Error",
+                                category: "PlayerSession",
+                                message: $"Error processing TCP connection: {ex.Message}",
+                                sessionId: session.Id,
+                                ipAddress: endpoint?.Address?.ToString(),
+                                exception: ex
+                            );
+                        }
+                    }
+                    catch { /* Ignore logging errors */ }
+                });
             }
             finally
             {
                 _sessions.TryRemove(session.Id, out _);
                 _securityManager.RemoveClient(session.Id);
                 await session.DisconnectAsync().ConfigureAwait(false);
+                
+                // Log disconnection to database
+                _ = Task.Run(async () =>
+                {
+                    try
+                    {
+                        if (_dbLoggingService != null)
+                        {
+                            await _dbLoggingService.LogConnectionEventAsync(
+                                eventType: "Disconnect",
+                                sessionId: session.Id,
+                                ipAddress: endpoint?.Address?.ToString() ?? "unknown",
+                                playerName: session.PlayerName,
+                                connectionType: "TCP",
+                                usedTls: _useTls
+                            );
+                        }
+                    }
+                    catch { /* Ignore logging errors */ }
+                });
+                
                 _logger.LogInformation("👋 Player session {SessionId} disconnected", session.Id);
             }
         }
@@ -527,7 +643,7 @@ public sealed class RacingServer : IHostedService, IDisposable
     
     public GameRoom CreateRoom(string name, string hostId)
     {
-        var room = new GameRoom { Name = name, HostId = hostId };
+        var room = new GameRoom(_dbLoggingService, _logger) { Name = name, HostId = hostId };
         _rooms.TryAdd(room.Id, room);
         _logger.LogInformation("🏁 New game room created: {RoomName} (ID: {RoomId}) by host {HostId}", 
             name, room.Id, hostId);

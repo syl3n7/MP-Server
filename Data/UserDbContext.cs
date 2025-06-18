@@ -12,10 +12,17 @@ namespace MP.Server.Data
         {
         }
         
+        // User management tables
         public DbSet<User> Users { get; set; } = null!;
         public DbSet<UserSession> UserSessions { get; set; } = null!;
         public DbSet<PasswordResetRequest> PasswordResetRequests { get; set; } = null!;
         public DbSet<LoginAuditLog> LoginAuditLogs { get; set; } = null!;
+        
+        // Server logging tables
+        public DbSet<ServerLog> ServerLogs { get; set; } = null!;
+        public DbSet<ConnectionLog> ConnectionLogs { get; set; } = null!;
+        public DbSet<SecurityLog> SecurityLogs { get; set; } = null!;
+        public DbSet<RoomActivityLog> RoomActivityLogs { get; set; } = null!;
         
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -79,6 +86,55 @@ namespace MP.Server.Data
                     
                 entity.HasIndex(e => e.Timestamp);
                 entity.HasIndex(e => e.UserId);
+                
+                entity.Property(e => e.Timestamp)
+                    .HasDefaultValueSql("CURRENT_TIMESTAMP(6)");
+            });
+            
+            // ServerLog configuration
+            modelBuilder.Entity<ServerLog>(entity =>
+            {
+                entity.HasIndex(e => e.Timestamp);
+                entity.HasIndex(e => e.Level);
+                entity.HasIndex(e => e.Category);
+                entity.HasIndex(e => e.SessionId);
+                
+                entity.Property(e => e.Timestamp)
+                    .HasDefaultValueSql("CURRENT_TIMESTAMP(6)");
+            });
+            
+            // ConnectionLog configuration
+            modelBuilder.Entity<ConnectionLog>(entity =>
+            {
+                entity.HasIndex(e => e.Timestamp);
+                entity.HasIndex(e => e.SessionId);
+                entity.HasIndex(e => e.IpAddress);
+                entity.HasIndex(e => e.EventType);
+                
+                entity.Property(e => e.Timestamp)
+                    .HasDefaultValueSql("CURRENT_TIMESTAMP(6)");
+            });
+            
+            // SecurityLog configuration
+            modelBuilder.Entity<SecurityLog>(entity =>
+            {
+                entity.HasIndex(e => e.Timestamp);
+                entity.HasIndex(e => e.IpAddress);
+                entity.HasIndex(e => e.EventType);
+                entity.HasIndex(e => e.Severity);
+                entity.HasIndex(e => e.IsResolved);
+                
+                entity.Property(e => e.Timestamp)
+                    .HasDefaultValueSql("CURRENT_TIMESTAMP(6)");
+            });
+            
+            // RoomActivityLog configuration
+            modelBuilder.Entity<RoomActivityLog>(entity =>
+            {
+                entity.HasIndex(e => e.Timestamp);
+                entity.HasIndex(e => e.RoomId);
+                entity.HasIndex(e => e.EventType);
+                entity.HasIndex(e => e.PlayerId);
                 
                 entity.Property(e => e.Timestamp)
                     .HasDefaultValueSql("CURRENT_TIMESTAMP(6)");

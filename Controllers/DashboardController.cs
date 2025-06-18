@@ -483,12 +483,12 @@ namespace MP.Server.Controllers
                 return Json(new { success = false, message = "User management service not available" });
             }
 
-            if (string.IsNullOrEmpty(request.UserId) || string.IsNullOrEmpty(request.Reason))
+            if (request.UserId <= 0 || string.IsNullOrEmpty(request.Reason))
             {
                 return Json(new { success = false, message = "User ID and reason are required" });
             }
 
-            var result = await _userService.BanUserAsync(request.UserId, request.Reason, request.BanDurationDays);
+            var result = await _userService.BanUserAsync(request.UserId.ToString(), request.Reason, request.BanDurationDays);
             return Json(new { success = result.Success, message = result.Message });
         }
 
@@ -500,12 +500,12 @@ namespace MP.Server.Controllers
                 return Json(new { success = false, message = "User management service not available" });
             }
 
-            if (string.IsNullOrEmpty(request.UserId))
+            if (request.UserId <= 0)
             {
                 return Json(new { success = false, message = "User ID is required" });
             }
 
-            var result = await _userService.UnbanUserAsync(request.UserId);
+            var result = await _userService.UnbanUserAsync(request.UserId.ToString());
             return Json(new { success = result.Success, message = result.Message });
         }
 
@@ -517,12 +517,12 @@ namespace MP.Server.Controllers
                 return Json(new { success = false, message = "User management service not available" });
             }
 
-            if (string.IsNullOrEmpty(request.UserId))
+            if (request.UserId <= 0)
             {
                 return Json(new { success = false, message = "User ID is required" });
             }
 
-            var result = await _userService.AdminInitiatePasswordResetAsync(request.UserId);
+            var result = await _userService.AdminInitiatePasswordResetAsync(request.UserId.ToString());
             return Json(new { success = result.Success, message = result.Message });
         }
 
@@ -560,22 +560,300 @@ namespace MP.Server.Controllers
             return Json(auditLog);
         }
 
-        // Helper classes for request bodies
-        public class BanUserRequest
+        // Logging Endpoints
+
+        [HttpGet]
+        public async Task<IActionResult> GetServerLogs(string? level = null, string? category = null, int limit = 100)
         {
-            public string UserId { get; set; } = string.Empty;
-            public string Reason { get; set; } = string.Empty;
-            public int? BanDurationDays { get; set; }
+            try
+            {
+                var dbLoggingService = HttpContext.RequestServices.GetService<DatabaseLoggingService>();
+                if (dbLoggingService == null)
+                {
+                    return Json(new { success = false, message = "Database logging service not available" });
+                }
+
+                var logs = await dbLoggingService.GetRecentServerLogsAsync(limit, level, category);
+                
+                var result = logs.Select(log => new
+                {
+                    id = log.Id,
+                    timestamp = log.Timestamp.ToString("yyyy-MM-dd HH:mm:ss"),
+                    level = log.Level,
+                    category = log.Category,
+                    message = log.Message,
+                    sessionId = log.SessionId,
+                    ipAddress = log.IpAddress,
+                    playerName = log.PlayerName,
+                    roomId = log.RoomId,
+                    additionalData = log.AdditionalData,
+                    stackTrace = log.StackTrace
+                }).ToList();
+
+                return Json(new { success = true, logs = result });
+            }
+            catch (Exception ex)
+            {
+                return Json(new { success = false, message = ex.Message });
+            }
         }
 
-        public class UnbanUserRequest
+        [HttpGet]
+        public async Task<IActionResult> GetConnectionLogs(int limit = 100)
         {
-            public string UserId { get; set; } = string.Empty;
+            try
+            {
+                var dbLoggingService = HttpContext.RequestServices.GetService<DatabaseLoggingService>();
+                if (dbLoggingService == null)
+                {
+                    return Json(new { success = false, message = "Database logging service not available" });
+                }
+
+                var logs = await dbLoggingService.GetRecentConnectionLogsAsync(limit);
+                
+                var result = logs.Select(log => new
+                {
+                    id = log.Id,
+                    timestamp = log.Timestamp.ToString("yyyy-MM-dd HH:mm:ss"),
+                    eventType = log.EventType,
+                    sessionId = log.SessionId,
+                    ipAddress = log.IpAddress,
+                    playerName = log.PlayerName,
+                    connectionType = log.ConnectionType,
+                    usedTls = log.UsedTls,
+                    duration = log.Duration,
+                    reason = log.Reason
+                }).ToList();
+
+                return Json(new { success = true, logs = result });
+            }
+            catch (Exception ex)
+            {
+                return Json(new { success = false, message = ex.Message });
+            }
         }
 
-        public class ForcePasswordResetRequest
+        [HttpGet]
+        public async Task<IActionResult> GetSecurityLogs(bool unresolvedOnly = false, int limit = 100)
         {
-            public string UserId { get; set; } = string.Empty;
+            try
+            {
+                var dbLoggingService = HttpContext.RequestServices.GetService<DatabaseLoggingService>();
+                if (dbLoggingService == null)
+                {
+                    return Json(new { success = false, message = "Database logging service not available" });
+                }
+
+                var logs = await dbLoggingService.GetRecentSecurityLogsAsync(limit, unresolvedOnly);
+                
+                var result = logs.Select(log => new
+                {
+                    id = log.Id,
+                    timestamp = log.Timestamp.ToString("yyyy-MM-dd HH:mm:ss"),
+                    eventType = log.EventType,
+                    ipAddress = log.IpAddress,
+                    sessionId = log.SessionId,
+                    playerName = log.PlayerName,
+                    severity = log.Severity,
+                    description = log.Description,
+                    additionalData = log.AdditionalData,
+                    isResolved = log.IsResolved,
+                    resolution = log.Resolution
+                }).ToList();
+
+                return Json(new { success = true, logs = result });
+            }
+            catch (Exception ex)
+            {
+                return Json(new { success = false, message = ex.Message });
+            }
+        }
+
+        [HttpGet]
+        public async Task<IActionResult> GetRoomActivityLogs(string? roomId = null, int limit = 100)
+        {
+            try
+            {
+                var dbLoggingService = HttpContext.RequestServices.GetService<DatabaseLoggingService>();
+                if (dbLoggingService == null)
+                {
+                    return Json(new { success = false, message = "Database logging service not available" });
+                }
+
+                var logs = await dbLoggingService.GetRecentRoomActivityLogsAsync(limit, roomId);
+                
+                var result = logs.Select(log => new
+                {
+                    id = log.Id,
+                    timestamp = log.Timestamp.ToString("yyyy-MM-dd HH:mm:ss"),
+                    roomId = log.RoomId,
+                    roomName = log.RoomName,
+                    eventType = log.EventType,
+                    playerId = log.PlayerId,
+                    playerName = log.PlayerName,
+                    playerCount = log.PlayerCount,
+                    details = log.Details
+                }).ToList();
+
+                return Json(new { success = true, logs = result });
+            }
+            catch (Exception ex)
+            {
+                return Json(new { success = false, message = ex.Message });
+            }
+        }
+
+        [HttpGet]
+        public async Task<IActionResult> GetLogStatistics()
+        {
+            try
+            {
+                var dbLoggingService = HttpContext.RequestServices.GetService<DatabaseLoggingService>();
+                if (dbLoggingService == null)
+                {
+                    return Json(new { success = false, message = "Database logging service not available" });
+                }
+
+                // Get statistics for the last 24 hours
+                var since = DateTime.UtcNow.AddHours(-24);
+                var stats = await dbLoggingService.GetLogStatisticsAsync(since);
+
+                return Json(new { success = true, statistics = stats, period = "Last 24 hours" });
+            }
+            catch (Exception ex)
+            {
+                return Json(new { success = false, message = ex.Message });
+            }
+        }
+
+        [HttpPost]
+        public async Task<IActionResult> ExportLogs(string logType, string format = "csv", string? dateFrom = null, string? dateTo = null)
+        {
+            try
+            {
+                var dbLoggingService = HttpContext.RequestServices.GetService<DatabaseLoggingService>();
+                if (dbLoggingService == null)
+                {
+                    return Json(new { success = false, message = "Database logging service not available" });
+                }
+
+                DateTime? fromDate = null;
+                DateTime? toDate = null;
+
+                if (!string.IsNullOrEmpty(dateFrom) && DateTime.TryParse(dateFrom, out var from))
+                    fromDate = from;
+                if (!string.IsNullOrEmpty(dateTo) && DateTime.TryParse(dateTo, out var to))
+                    toDate = to;
+
+                var exportData = await dbLoggingService.ExportLogsAsync(logType, fromDate, toDate);
+                
+                if (format.ToLower() == "json")
+                {
+                    var jsonContent = System.Text.Json.JsonSerializer.Serialize(exportData, new JsonSerializerOptions { WriteIndented = true });
+                    var jsonBytes = System.Text.Encoding.UTF8.GetBytes(jsonContent);
+                    return File(jsonBytes, "application/json", $"{logType}_logs_{DateTime.UtcNow:yyyyMMdd_HHmmss}.json");
+                }
+                else
+                {
+                    var csvContent = ConvertToCsv(exportData, logType);
+                    var csvBytes = System.Text.Encoding.UTF8.GetBytes(csvContent);
+                    return File(csvBytes, "text/csv", $"{logType}_logs_{DateTime.UtcNow:yyyyMMdd_HHmmss}.csv");
+                }
+            }
+            catch (Exception ex)
+            {
+                return Json(new { success = false, message = ex.Message });
+            }
+        }
+
+        [HttpPost]
+        public async Task<IActionResult> ClearLogs(string logType, string? olderThan = null)
+        {
+            try
+            {
+                var dbLoggingService = HttpContext.RequestServices.GetService<DatabaseLoggingService>();
+                if (dbLoggingService == null)
+                {
+                    return Json(new { success = false, message = "Database logging service not available" });
+                }
+
+                DateTime? cutoffDate = null;
+                if (!string.IsNullOrEmpty(olderThan) && DateTime.TryParse(olderThan, out var date))
+                    cutoffDate = date;
+
+                var deletedCount = await dbLoggingService.ClearLogsAsync(logType, cutoffDate);
+
+                return Json(new { success = true, message = $"Deleted {deletedCount} log entries", deletedCount });
+            }
+            catch (Exception ex)
+            {
+                return Json(new { success = false, message = ex.Message });
+            }
+        }
+
+        private string ConvertToCsv(object data, string logType)
+        {
+            var sb = new System.Text.StringBuilder();
+            
+            switch (logType.ToLower())
+            {
+                case "server":
+                    if (data is IEnumerable<object> serverLogs)
+                    {
+                        sb.AppendLine("Id,Timestamp,Level,Message,Category,StackTrace");
+                        foreach (dynamic log in serverLogs)
+                        {
+                            sb.AppendLine($"{log.Id},{log.Timestamp},{log.Level},{EscapeCsv(log.Message)},{EscapeCsv(log.Category)},{EscapeCsv(log.StackTrace)}");
+                        }
+                    }
+                    break;
+                case "connection":
+                    if (data is IEnumerable<object> connectionLogs)
+                    {
+                        sb.AppendLine("Id,Timestamp,EventType,IpAddress,SessionId,PlayerName,Reason");
+                        foreach (dynamic log in connectionLogs)
+                        {
+                            sb.AppendLine($"{log.Id},{log.Timestamp},{log.EventType},{log.IpAddress},{log.SessionId},{EscapeCsv(log.PlayerName)},{EscapeCsv(log.Reason)}");
+                        }
+                    }
+                    break;
+                case "security":
+                    if (data is IEnumerable<object> securityLogs)
+                    {
+                        sb.AppendLine("Id,Timestamp,EventType,IpAddress,SessionId,PlayerName,Severity,Description,AdditionalData,IsResolved,Resolution");
+                        foreach (dynamic log in securityLogs)
+                        {
+                            sb.AppendLine($"{log.Id},{log.Timestamp},{log.EventType},{log.IpAddress},{log.SessionId},{EscapeCsv(log.PlayerName)},{log.Severity},{EscapeCsv(log.Description)},{EscapeCsv(log.AdditionalData)},{log.IsResolved},{EscapeCsv(log.Resolution)}");
+                        }
+                    }
+                    break;
+                case "room":
+                    if (data is IEnumerable<object> roomLogs)
+                    {
+                        sb.AppendLine("Id,Timestamp,RoomId,RoomName,EventType,PlayerId,PlayerName,PlayerCount,Details");
+                        foreach (dynamic log in roomLogs)
+                        {
+                            sb.AppendLine($"{log.Id},{log.Timestamp},{log.RoomId},{EscapeCsv(log.RoomName)},{log.EventType},{log.PlayerId},{EscapeCsv(log.PlayerName)},{log.PlayerCount},{EscapeCsv(log.Details)}");
+                        }
+                    }
+                    break;
+            }
+            
+            return sb.ToString();
+        }
+
+        private string EscapeCsv(string? value)
+        {
+            if (string.IsNullOrEmpty(value))
+                return "";
+            
+            // Escape quotes and wrap in quotes if contains comma, quote, or newline
+            if (value.Contains(',') || value.Contains('"') || value.Contains('\n') || value.Contains('\r'))
+            {
+                return "\"" + value.Replace("\"", "\"\"") + "\"";
+            }
+            
+            return value;
         }
     }
 }

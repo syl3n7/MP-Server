@@ -4,6 +4,8 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
 using MP.Server;
+using MP.Server.Services;
+using Microsoft.Extensions.Logging;
 
 public sealed class GameRoom
 {
@@ -13,6 +15,9 @@ public sealed class GameRoom
     public int MaxPlayers { get; set; } = 20;
     public bool IsActive { get; set; }
     public DateTime CreatedAt { get; } = DateTime.UtcNow;
+    
+    private readonly DatabaseLoggingService? _loggingService;
+    private readonly ILogger? _logger;
     
     // Predefined spawn positions on the track
     private readonly Vector3[] _trackGaragePositions = new Vector3[]
@@ -42,12 +47,27 @@ public sealed class GameRoom
     private readonly ConcurrentDictionary<string, PlayerInfo> _players = new();
     private readonly ConcurrentDictionary<string, int> _playerPositions = new();
     
+    public GameRoom(DatabaseLoggingService? loggingService = null, ILogger? logger = null)
+    {
+        _loggingService = loggingService;
+        _logger = logger;
+        
+        // Log room creation
+        _loggingService?.LogRoomActivityAsync(
+            Id, Name, "RoomCreated", null, null, 0, 
+            $"Room created with max players: {MaxPlayers}");
+    }
+    
     public IReadOnlyCollection<PlayerInfo> Players => _players.Values.ToList().AsReadOnly();
     
     public bool TryAddPlayer(PlayerInfo player)
     {
         if (_players.Count >= MaxPlayers)
+        {
+            _logger?.LogWarning("Failed to add player {PlayerId} to room {RoomId}: Room is full ({Count}/{MaxPlayers})", 
+                player.Id, Id, _players.Count, MaxPlayers);
             return false;
+        }
             
         // First try to add the player to prevent race conditions
         if (_players.TryAdd(player.Id, player))
@@ -59,6 +79,15 @@ public sealed class GameRoom
             {
                 _playerPositions.TryAdd(player.Id, positionIndex);
             }
+            
+            _logger?.LogInformation("Player {PlayerId} ({PlayerName}) joined room {RoomId} at position {Position}", 
+                player.Id, player.PlayerName, Id, positionIndex);
+            
+            // Log room activity
+            _loggingService?.LogRoomActivityAsync(
+                Id, Name, "PlayerJoined", player.Id, player.PlayerName, _players.Count,
+                $"Player joined at spawn position {positionIndex}");
+            
             return true;
         }
         
@@ -67,8 +96,23 @@ public sealed class GameRoom
     
     public bool TryRemovePlayer(string playerId)
     {
+        var player = _players.TryGetValue(playerId, out var playerInfo) ? playerInfo : null;
+        
         _playerPositions.TryRemove(playerId, out _);
-        return _players.TryRemove(playerId, out _);
+        var removed = _players.TryRemove(playerId, out _);
+        
+        if (removed && player != null)
+        {
+            _logger?.LogInformation("Player {PlayerId} ({PlayerName}) left room {RoomId}", 
+                playerId, player.PlayerName, Id);
+            
+            // Log room activity
+            _loggingService?.LogRoomActivityAsync(
+                Id, Name, "PlayerLeft", playerId, player.PlayerName, _players.Count,
+                "Player left the room");
+        }
+        
+        return removed;
     }
     
     public Vector3 GetPlayerSpawnPosition(string playerId)
@@ -93,5 +137,42 @@ public sealed class GameRoom
     public void StartGame()
     {
         IsActive = true;
+        
+        _logger?.LogInformation("Game started in room {RoomId} with {PlayerCount} players", 
+            Id, _players.Count);
+        
+        // Log room activity
+        _loggingService?.LogRoomActivityAsync(
+            Id, Name, "GameStarted", HostId, null, _players.Count,
+            $"Game started with {_players.Count} players");
+    }
+    
+    public void EndGame(string? reason = null)
+    {
+        IsActive = false;
+        
+        _logger?.LogInformation("Game ended in room {RoomId}. Reason: {Reason}", 
+            Id, reason ?? "Normal completion");
+        
+        // Log room activity
+        _loggingService?.LogRoomActivityAsync(
+            Id, Name, "GameEnded", HostId, null, _players.Count,
+            $"Game ended. Reason: {reason ?? "Normal completion"}");
+    }
+    
+    public void SetHost(string newHostId)
+    {
+        var oldHostId = HostId;
+        HostId = newHostId;
+        
+        var newHost = _players.TryGetValue(newHostId, out var hostInfo) ? hostInfo : null;
+        
+        _logger?.LogInformation("Host changed in room {RoomId} from {OldHostId} to {NewHostId} ({HostName})", 
+            Id, oldHostId, newHostId, newHost?.PlayerName);
+        
+        // Log room activity
+        _loggingService?.LogRoomActivityAsync(
+            Id, Name, "HostChanged", newHostId, newHost?.PlayerName, _players.Count,
+            $"Host changed from {oldHostId} to {newHostId}");
     }
 }

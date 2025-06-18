@@ -5,6 +5,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.EntityFrameworkCore;
 using MP.Server.Data;
+using MP.Server.Security;
 
 namespace MP.Server.Services
 {
@@ -15,6 +16,7 @@ namespace MP.Server.Services
     {
         private readonly ILogger<ServerManagementService> _logger;
         private readonly IServiceProvider _serviceProvider;
+        private readonly DatabaseLoggingService _dbLoggingService;
         private RacingServer? _server;
         private CancellationTokenSource? _serverCts;
         private bool _isRunning = false;
@@ -23,6 +25,10 @@ namespace MP.Server.Services
         {
             _logger = logger;
             _serviceProvider = serviceProvider;
+            
+            // Get database logging service
+            using var scope = serviceProvider.CreateScope();
+            _dbLoggingService = scope.ServiceProvider.GetRequiredService<DatabaseLoggingService>();
         }
 
         public bool IsServerRunning => _isRunning && _server != null;
@@ -71,8 +77,9 @@ namespace MP.Server.Services
                 // Create server instance
                 using var scope = _serviceProvider.CreateScope();
                 var logger = scope.ServiceProvider.GetRequiredService<ILogger<RacingServer>>();
+                var dbLoggingService = scope.ServiceProvider.GetRequiredService<DatabaseLoggingService>();
                 
-                _server = new RacingServer(config.TcpPort, config.UdpPort, logger, config.UseTls);
+                _server = new RacingServer(config.TcpPort, config.UdpPort, logger, config.UseTls, null, null, dbLoggingService);
                 _serverCts = new CancellationTokenSource();
 
                 // Start the server

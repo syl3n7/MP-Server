@@ -7,4 +7,7 @@ public record PlayerInfo(
     IPEndPoint? UdpEndpoint,
     Vector3 Position,
     Quaternion Rotation
-);
+)
+{
+    public string PlayerName => Name;
+}

@@ -5,6 +5,7 @@ using System.Linq;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using MP.Server.Services;
 
 namespace MP.Server.Security
 {
@@ -17,13 +18,15 @@ namespace MP.Server.Security
         private readonly RateLimiter _rateLimiter;
         private readonly SecurityConfig _config;
         private readonly ILogger? _logger;
+        private readonly DatabaseLoggingService? _loggingService;
         private readonly ConcurrentDictionary<string, PlayerSecurityInfo> _playerSecurity = new();
         private readonly ConcurrentQueue<SecurityEvent> _securityEvents = new();
         
-        public SecurityManager(SecurityConfig config, ILogger? logger = null)
+        public SecurityManager(SecurityConfig config, ILogger? logger = null, DatabaseLoggingService? loggingService = null)
         {
             _config = config ?? new SecurityConfig();
             _logger = logger;
+            _loggingService = loggingService;
             
             _packetValidator = new PacketValidator(logger as ILogger<PacketValidator> ?? NullLogger<PacketValidator>.Instance);
             _rateLimiter = new RateLimiter(logger);
@@ -223,6 +226,29 @@ namespace MP.Server.Security
             
             _logger?.Log(logLevel, "Security Event [{EventType}] Client: {ClientId} - {Description}", 
                 eventType, clientId, description);
+            
+            // Log to database if logging service is available
+            if (_loggingService != null)
+            {
+                var playerInfo = _playerSecurity.TryGetValue(clientId, out var info) ? info : null;
+                var additionalData = new
+                {
+                    EventType = eventType.ToString(),
+                    ThreatLevel = playerInfo != null ? CalculateThreatLevel(playerInfo) : 0,
+                    TotalViolations = playerInfo?.TotalViolations ?? 0,
+                    Timestamp = DateTime.UtcNow
+                };
+                
+                _ = _loggingService.LogSecurityEventAsync(
+                    eventType: eventType.ToString(),
+                    sessionId: clientId,
+                    ipAddress: "Unknown", // Would need to be passed from calling context
+                    playerName: null, // Would need to be passed from calling context
+                    severity: severity,
+                    description: description,
+                    additionalData: additionalData
+                );
+            }
         }
         
         private int CalculateThreatLevel(PlayerSecurityInfo info)
