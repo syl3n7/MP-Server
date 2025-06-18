@@ -47,16 +47,55 @@ public sealed class PlayerSession : IDisposable
             
             try
             {
-                // Authenticate as server with the certificate
+                // Create SSL server authentication options
+                var sslOptions = new SslServerAuthenticationOptions
+                {
+                    ServerCertificate = certificate,
+                    ClientCertificateRequired = false,
+                    EnabledSslProtocols = System.Security.Authentication.SslProtocols.Tls12 | System.Security.Authentication.SslProtocols.Tls13,
+                    CertificateRevocationCheckMode = System.Security.Cryptography.X509Certificates.X509RevocationMode.NoCheck
+                };
+                
+                // Authenticate as server with timeout
                 sslStream.AuthenticateAsServer(certificate, false, System.Security.Authentication.SslProtocols.Tls12 | System.Security.Authentication.SslProtocols.Tls13, false);
                 _stream = sslStream;
-                _server.Logger.LogDebug("🔒 TLS handshake completed for session {SessionId}", Id);
+                _server.Logger.LogInformation("🔒 TLS handshake completed for session {SessionId}", Id);
+            }
+            catch (System.Security.Authentication.AuthenticationException ex)
+            {
+                _server.Logger.LogWarning("⚠️ TLS handshake failed for session {SessionId} - Client may be using outdated protocol: {Error}", 
+                                         Id, ex.Message);
+                
+                // Log the client endpoint for debugging
+                var clientEndpoint = socket.RemoteEndPoint?.ToString() ?? "unknown";
+                _ = Task.Run(async () =>
+                {
+                    try
+                    {
+                        await _server.DatabaseLoggingService?.LogSecurityEventAsync(
+                            "TLS_HANDSHAKE_FAILED", 
+                            clientEndpoint,
+                            2, // Medium severity
+                            $"TLS handshake failed - client may be using outdated protocol: {ex.Message}",
+                            Id
+                        );
+                    }
+                    catch
+                    {
+                        // Ignore logging errors in constructor
+                    }
+                });
+                
+                sslStream.Dispose();
+                _stream = networkStream; // Fallback to plain TCP
+                _useTls = false; // Update flag to reflect actual state
             }
             catch (Exception ex)
             {
-                _server.Logger.LogError(ex, "❌ TLS handshake failed for session {SessionId}", Id);
+                _server.Logger.LogError(ex, "❌ Unexpected TLS error for session {SessionId}", Id);
                 sslStream.Dispose();
-                _stream = networkStream; // Fallback to plain text
+                _stream = networkStream; // Fallback to plain TCP
+                _useTls = false;
             }
         }
         else

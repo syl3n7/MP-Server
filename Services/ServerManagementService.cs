@@ -33,6 +33,8 @@ namespace MP.Server.Services
 
         public bool IsServerRunning => _isRunning && _server != null;
 
+        public RacingServer? GetServer() => _server;
+
         public ServerStatus GetServerStatus()
         {
             if (!_isRunning || _server == null)
@@ -174,11 +176,6 @@ namespace MP.Server.Services
                     Message = $"Database connection failed: {ex.Message}"
                 };
             }
-        }
-
-        public RacingServer? GetServer()
-        {
-            return _server;
         }
     }
 

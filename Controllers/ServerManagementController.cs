@@ -46,6 +46,36 @@ namespace MP.Server.Controllers
         }
 
         /// <summary>
+        /// Get current server status for dashboard
+        /// </summary>
+        [HttpGet("dashboard-status")]
+        public IActionResult GetDashboardServerStatus()
+        {
+            try
+            {
+                _logger.LogInformation("Dashboard requesting server status");
+                
+                var status = _serverManagement.GetServerStatus();
+                
+                _logger.LogInformation("Server status: IsRunning={IsRunning}, Message={Message}", 
+                                      status.IsRunning, status.Message);
+                
+                return Ok(new { 
+                    isRunning = status.IsRunning,
+                    message = status.Message,
+                    startTime = status.StartTime,
+                    activeSessions = status.ActiveSessions,
+                    activeRooms = status.ActiveRooms
+                });
+            }
+            catch (System.Exception ex)
+            {
+                _logger.LogError(ex, "Error getting dashboard server status");
+                return StatusCode(500, new { message = "Error getting server status" });
+            }
+        }
+
+        /// <summary>
         /// Start the racing server with specified configuration
         /// </summary>
         [HttpPost("start")]
@@ -77,6 +107,49 @@ namespace MP.Server.Controllers
         }
 
         /// <summary>
+        /// Start the racing server from dashboard with dashboard config format
+        /// </summary>
+        [HttpPost("dashboard-start")]
+        public async Task<IActionResult> StartServerFromDashboard([FromBody] DashboardServerConfig config)
+        {
+            try
+            {
+                _logger.LogInformation("Dashboard requesting server start with config: TCP={TcpPort}, UDP={UdpPort}, TLS={UseTls}", 
+                                      config.TcpPort, config.UdpPort, config.UseTls);
+
+                if (config == null)
+                {
+                    return BadRequest(new { success = false, message = "Server configuration is required" });
+                }
+
+                // Convert dashboard config to server config
+                var serverConfig = new ServerConfiguration
+                {
+                    TcpPort = config.TcpPort,
+                    UdpPort = config.UdpPort,
+                    UseTls = config.UseTls,
+                    ConnectionString = _configuration.GetConnectionString("DefaultConnection") ?? 
+                                     "Server=localhost;Database=mpserver;User=root;Password=yourpassword;Port=3306;"
+                };
+
+                var result = await _serverManagement.StartServerAsync(serverConfig);
+                
+                _logger.LogInformation("Server start result: Success={Success}, Message={Message}", 
+                                      result.Success, result.Message);
+                
+                return Ok(new { 
+                    success = result.Success, 
+                    message = result.Message 
+                });
+            }
+            catch (System.Exception ex)
+            {
+                _logger.LogError(ex, "Error starting server from dashboard");
+                return StatusCode(500, new { success = false, message = "Error starting server: " + ex.Message });
+            }
+        }
+
+        /// <summary>
         /// Stop the racing server
         /// </summary>
         [HttpPost("stop")]
@@ -99,6 +172,33 @@ namespace MP.Server.Controllers
             {
                 _logger.LogError(ex, "Error stopping server");
                 return StatusCode(500, new { message = "Error stopping server" });
+            }
+        }
+
+        /// <summary>
+        /// Stop the racing server from dashboard
+        /// </summary>
+        [HttpPost("dashboard-stop")]
+        public async Task<IActionResult> StopServerFromDashboard()
+        {
+            try
+            {
+                _logger.LogInformation("Dashboard requesting server stop");
+                
+                var result = await _serverManagement.StopServerAsync();
+                
+                _logger.LogInformation("Server stop result: Success={Success}, Message={Message}", 
+                                      result.Success, result.Message);
+                
+                return Ok(new { 
+                    success = result.Success, 
+                    message = result.Message 
+                });
+            }
+            catch (System.Exception ex)
+            {
+                _logger.LogError(ex, "Error stopping server from dashboard");
+                return StatusCode(500, new { success = false, message = "Error stopping server: " + ex.Message });
             }
         }
 
@@ -136,89 +236,6 @@ namespace MP.Server.Controllers
             {
                 _logger.LogError(ex, "Error getting server stats");
                 return StatusCode(500, new { message = "Error getting server stats" });
-            }
-        }
-
-        /// <summary>
-        /// Get current server status - used by dashboard
-        /// </summary>
-        [HttpGet("dashboard-status")]
-        public IActionResult DashboardStatus()
-        {
-            try
-            {
-                var status = _serverManagement.GetServerStatus();
-                
-                // Add basic status information
-                var result = new
-                {
-                    isRunning = status.IsRunning,
-                    message = status.Message,
-                    startTime = status.StartTime,
-                    activeSessions = status.ActiveSessions,
-                    activeRooms = status.ActiveRooms
-                };
-                
-                return Json(result);
-            }
-            catch (System.Exception ex)
-            {
-                _logger.LogError(ex, "Error getting server status");
-                return Json(new { 
-                    isRunning = false, 
-                    message = "Error getting server status"
-                });
-            }
-        }
-
-        /// <summary>
-        /// Start server - used by dashboard
-        /// </summary>
-        [HttpPost("dashboard-start")]
-        public async Task<IActionResult> DashboardStartServer([FromBody] DashboardServerConfig config)
-        {
-            try
-            {
-                // Get connection string from configuration
-                var connectionString = _configuration.GetConnectionString("DefaultConnection");
-                if (string.IsNullOrEmpty(connectionString))
-                {
-                    return Json(new { success = false, message = "Database connection string not configured in appsettings.json" });
-                }
-
-                var serverConfig = new ServerConfiguration
-                {
-                    ConnectionString = connectionString,
-                    TcpPort = config.TcpPort,
-                    UdpPort = config.UdpPort,
-                    UseTls = config.UseTls
-                };
-
-                var result = await _serverManagement.StartServerAsync(serverConfig);
-                return Json(new { success = result.Success, message = result.Message });
-            }
-            catch (System.Exception ex)
-            {
-                _logger.LogError(ex, "Error starting server");
-                return Json(new { success = false, message = $"Error starting server: {ex.Message}" });
-            }
-        }
-
-        /// <summary>
-        /// Stop server - used by dashboard
-        /// </summary>
-        [HttpPost("dashboard-stop")]
-        public async Task<IActionResult> DashboardStopServer()
-        {
-            try
-            {
-                var result = await _serverManagement.StopServerAsync();
-                return Json(new { success = result.Success, message = result.Message });
-            }
-            catch (System.Exception ex)
-            {
-                _logger.LogError(ex, "Error stopping server");
-                return Json(new { success = false, message = $"Error stopping server: {ex.Message}" });
             }
         }
 

@@ -553,7 +553,12 @@
                     error: function(xhr, status, error) {
                         console.error("Start server failed:", status, error);
                         console.error("Response:", xhr.responseText);
-                        showServerOperationResult(false, "Failed to start server: " + (xhr.responseJSON?.message || error));
+                        try {
+                            const response = JSON.parse(xhr.responseText);
+                            showServerOperationResult(false, response.message || "Failed to start server");
+                        } catch {
+                            showServerOperationResult(false, "Failed to start server: " + error);
+                        }
                     },
                     complete: function() {
                         $("#startServerButton").prop('disabled', false).text('Start Server');
@@ -565,16 +570,30 @@
                 if (confirm("Are you sure you want to stop the server? This will disconnect all players.")) {
                     $(this).prop('disabled', true).text('Stopping...');
                     
-                    $.post("/api/ServerManagement/dashboard-stop", function(data) {
-                        showServerOperationResult(data.success, data.message);
-                        if (data.success) {
-                            updateServerControlButtons(false);
+                    $.ajax({
+                        url: "/api/ServerManagement/dashboard-stop",
+                        method: "POST",
+                        contentType: "application/json",
+                        success: function(data) {
+                            console.log("Stop server response:", data);
+                            showServerOperationResult(data.success, data.message);
+                            if (data.success) {
+                                updateServerControlButtons(false);
+                            }
+                            loadServerStatus();
+                        },
+                        error: function(xhr, status, error) {
+                            console.error("Stop server failed:", status, error);
+                            try {
+                                const response = JSON.parse(xhr.responseText);
+                                showServerOperationResult(false, response.message || "Failed to stop server");
+                            } catch {
+                                showServerOperationResult(false, "Failed to stop server: " + error);
+                            }
+                        },
+                        complete: function() {
+                            $("#stopServerButton").prop('disabled', false).text('Stop Server');
                         }
-                        loadServerStatus();
-                    }).fail(function() {
-                        showServerOperationResult(false, "Failed to stop server");
-                    }).always(function() {
-                        $("#stopServerButton").prop('disabled', false).text('Stop Server');
                     });
                 }
             });

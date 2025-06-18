@@ -56,6 +56,7 @@ public sealed class RacingServer : IHostedService, IDisposable
     
     // Security system access
     public SecurityManager SecurityManager => _securityManager;
+    public DatabaseLoggingService? DatabaseLoggingService => _dbLoggingService;
     
     public RacingServer(int tcpPort, int udpPort, ILogger<RacingServer>? logger = null, bool useTls = true, X509Certificate2? certificate = null, SecurityConfig? securityConfig = null, DatabaseLoggingService? dbLoggingService = null)
     {
