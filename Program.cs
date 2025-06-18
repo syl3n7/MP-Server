@@ -67,8 +67,40 @@ try
         Console.WriteLine("Database initialized with default connection.");
     }
 
+    // Auto-start the racing server with default configuration
+    try
+    {
+        var serverManagement = app.Services.GetRequiredService<ServerManagementService>();
+        var defaultConfig = new MP.Server.Services.ServerConfiguration
+        {
+            TcpPort = 443,
+            UdpPort = 443,
+            UseTls = true,
+            ConnectionString = connectionString
+        };
+        
+        var startResult = await serverManagement.StartServerAsync(defaultConfig);
+        if (startResult.Success)
+        {
+            Console.WriteLine("🚀 Racing server started automatically!");
+            Console.WriteLine($"   TCP Port: {defaultConfig.TcpPort}");
+            Console.WriteLine($"   UDP Port: {defaultConfig.UdpPort}");
+            Console.WriteLine($"   TLS: {(defaultConfig.UseTls ? "Enabled" : "Disabled")}");
+        }
+        else
+        {
+            Console.WriteLine($"⚠️  Could not auto-start racing server: {startResult.Message}");
+            Console.WriteLine("   You can start it manually from the dashboard.");
+        }
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"⚠️  Failed to auto-start racing server: {ex.Message}");
+        Console.WriteLine("   You can start it manually from the dashboard.");
+    }
+
     Console.WriteLine("🌐 Web dashboard started! Access it at: http://localhost:8080");
-    Console.WriteLine("📊 Navigate to the dashboard to configure database and start the racing server.");
+    Console.WriteLine("📊 Dashboard ready - server logs and controls available.");
 
     // Run the web application on port 8080
     app.Urls.Add("http://0.0.0.0:8080");
