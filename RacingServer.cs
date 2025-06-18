@@ -418,16 +418,16 @@ public sealed class RacingServer : IHostedService, IDisposable
             using JsonDocument document = JsonDocument.Parse(jsonToProcess);
             var root = document.RootElement;
             
-            // 🛡️ SECURITY VALIDATION - Validate packet before processing
+            // 🛡️ SECURITY VALIDATION - Validate packet AFTER decryption
             string clientId = "unknown";
             if (root.TryGetProperty("sessionId", out JsonElement sessionIdElement))
             {
                 clientId = sessionIdElement.GetString() ?? "unknown";
             }
             
-            // For security validation, use the original raw data (not decrypted)
-            // This ensures rate limiting and security checks work on all packets
-            var validationResult = _securityManager.ValidateUdpPacket(clientId, data.ToArray(), DateTime.UtcNow);
+            // For security validation, use the decrypted JSON (not raw encrypted data)
+            // This ensures rate limiting and security checks work on the actual commands
+            var validationResult = _securityManager.ValidateUdpPacket(clientId, Encoding.UTF8.GetBytes(jsonToProcess), DateTime.UtcNow);
             if (!validationResult.IsValid)
             {
                 _logger.LogWarning("🚫 Security validation failed for UDP packet from {RemoteEndPoint}: {Reason}", 
