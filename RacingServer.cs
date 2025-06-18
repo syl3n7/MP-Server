@@ -1016,7 +1016,7 @@ public sealed class RacingServer : IHostedService, IDisposable
             
             foreach (var session in _sessions.Values)
             {
-                if session?.CurrentRoomId == roomId && session.Id != senderId)
+                if (session?.CurrentRoomId == roomId && session.Id != senderId)
                 {
                     tasks.Add(session.SendJsonAsync(chatMessage, CancellationToken.None));
                 }
