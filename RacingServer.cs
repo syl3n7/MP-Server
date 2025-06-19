@@ -418,63 +418,6 @@ public sealed class RacingServer : IHostedService, IDisposable
                 _logger.LogWarning("🚫 Rejected UDP packet from {RemoteEndPoint}: could not decrypt with any session key. All UDP packets must be encrypted.", remoteEndPoint);
                 return;
             }
-                            {
-                                // Not encrypted with this session's key, continue trying others
-                                _logger.LogDebug("❌ Failed to decrypt UDP packet with session {SessionId}: {Error}", 
-                                    session.Id, ex.Message);
-                            }
-                        }
-                    }
-                }
-                else if (expectedLength > 1024)
-                {
-                    _logger.LogWarning("⚠️ Received UDP packet from {RemoteEndPoint} with suspiciously large length header ({ExpectedLength}), rejecting", remoteEndPoint, expectedLength);
-                    return;
-                }
-                else if (expectedLength < 0)
-                {
-                    _logger.LogDebug("🔍 UDP packet from {RemoteEndPoint} doesn't appear to be encrypted (negative length header), will try as plain text", remoteEndPoint);
-                }
-            }
-            
-            // Determine how to process the packet
-            if (isEncryptedPacket)
-            {
-                if (string.IsNullOrEmpty(jsonToProcess))
-                {
-                    // If it looks encrypted but we couldn't decrypt, reject it
-                    _logger.LogWarning("� Received encrypted UDP packet from {RemoteEndPoint} but could not decrypt with any session key. Packet rejected.", remoteEndPoint);
-                    return;
-                }
-                else
-                {
-                    _logger.LogDebug("🔓 Processing decrypted UDP packet from {RemoteEndPoint}: {Message}", remoteEndPoint, jsonToProcess);
-                }
-            }
-            else
-            {
-                // Only try as plain text if it does NOT look encrypted
-                // Additional check: if the first few bytes contain invalid JSON characters, reject it
-                var rawText = Encoding.UTF8.GetString(data.Span).TrimEnd('\n');
-                
-                // Check if the string starts with typical JSON characters
-                if (!rawText.StartsWith("{") && !rawText.StartsWith("["))
-                {
-                    _logger.LogWarning("🚫 Received UDP packet from {RemoteEndPoint} that doesn't look like JSON (starts with '{FirstChar}'). Packet rejected.", 
-                        remoteEndPoint, rawText.Length > 0 ? rawText[0] : '?');
-                    return;
-                }
-                
-                // Check for invalid characters that suggest binary/compressed data
-                if (rawText.Any(c => c < 32 && c != '\t' && c != '\n' && c != '\r'))
-                {
-                    _logger.LogWarning("🚫 Received UDP packet from {RemoteEndPoint} containing binary data. Packet rejected.", remoteEndPoint);
-                    return;
-                }
-                
-                jsonToProcess = rawText;
-                _logger.LogDebug("🔍 Processing plain UDP packet from {RemoteEndPoint}: {Message}", remoteEndPoint, jsonToProcess);
-            }
 
             // Parse and process JSON within using block
             using JsonDocument document = JsonDocument.Parse(jsonToProcess);
