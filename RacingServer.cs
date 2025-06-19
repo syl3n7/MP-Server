@@ -434,7 +434,25 @@ public sealed class RacingServer : IHostedService, IDisposable
             else
             {
                 // Only try as plain text if it does NOT look encrypted
-                jsonToProcess = Encoding.UTF8.GetString(data.Span).TrimEnd('\n');
+                // Additional check: if the first few bytes contain invalid JSON characters, reject it
+                var rawText = Encoding.UTF8.GetString(data.Span).TrimEnd('\n');
+                
+                // Check if the string starts with typical JSON characters
+                if (!rawText.StartsWith("{") && !rawText.StartsWith("["))
+                {
+                    _logger.LogWarning("🚫 Received UDP packet from {RemoteEndPoint} that doesn't look like JSON (starts with '{FirstChar}'). Packet rejected.", 
+                        remoteEndPoint, rawText.Length > 0 ? rawText[0] : '?');
+                    return;
+                }
+                
+                // Check for invalid characters that suggest binary/compressed data
+                if (rawText.Any(c => c < 32 && c != '\t' && c != '\n' && c != '\r'))
+                {
+                    _logger.LogWarning("🚫 Received UDP packet from {RemoteEndPoint} containing binary data. Packet rejected.", remoteEndPoint);
+                    return;
+                }
+                
+                jsonToProcess = rawText;
                 _logger.LogDebug("🔍 Processing plain UDP packet from {RemoteEndPoint}: {Message}", remoteEndPoint, jsonToProcess);
             }
 
