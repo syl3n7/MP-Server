@@ -418,9 +418,13 @@ public sealed class RacingServer : IHostedService, IDisposable
             {
                 var packetData = data.ToArray();
                 var expectedLength = BitConverter.ToInt32(packetData, 0);
+                _logger.LogDebug("🔍 UDP packet from {RemoteEndPoint}: length={Length}, expectedLength={ExpectedLength}, firstBytes={FirstBytes}", 
+                    remoteEndPoint, data.Length, expectedLength, Convert.ToHexString(packetData.Take(8).ToArray()));
+                
                 if (expectedLength > 0 && expectedLength <= packetData.Length - 4 && expectedLength < 1024)
                 {
                     looksEncrypted = true;
+                    _logger.LogDebug("🔍 Packet looks encrypted from {RemoteEndPoint}", remoteEndPoint);
                 }
             }
 
