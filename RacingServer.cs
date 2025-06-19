@@ -358,46 +358,66 @@ public sealed class RacingServer : IHostedService, IDisposable
         
         try
         {
-            // Detect if this is an encrypted packet by checking the length header
-            bool isEncryptedPacket = false;
-            if (data.Length >= 4)
+            // ALL UDP packets MUST be encrypted - no plaintext allowed
+            if (data.Length < 4)
             {
-                var packetData = data.ToArray();
-                var expectedLength = BitConverter.ToInt32(packetData, 0);
-                
-                _logger.LogDebug("🔍 UDP packet from {RemoteEndPoint}: length={Length}, expectedLength={ExpectedLength}, firstBytes={FirstBytes}", 
-                    remoteEndPoint, data.Length, expectedLength, Convert.ToHexString(packetData.Take(8).ToArray()));
-                
-                // If the length header matches the actual encrypted data length, this is likely encrypted
-                // Also validate that the expected length is reasonable (not negative, not too large)
-                if (expectedLength > 0 && expectedLength <= packetData.Length - 4 && expectedLength < 1024)
+                _logger.LogWarning("🚫 Rejected UDP packet from {RemoteEndPoint}: too short (length: {Length})", remoteEndPoint, data.Length);
+                return;
+            }
+            
+            var packetData = data.ToArray();
+            var expectedLength = BitConverter.ToInt32(packetData, 0);
+            
+            _logger.LogDebug("🔍 UDP packet from {RemoteEndPoint}: totalLength={TotalLength}, headerLength={HeaderLength}, firstBytes={FirstBytes}", 
+                remoteEndPoint, data.Length, expectedLength, Convert.ToHexString(packetData.Take(8).ToArray()));
+            
+            // Validate packet structure for encrypted format
+            if (expectedLength <= 0 || expectedLength > 1024 || expectedLength != packetData.Length - 4)
+            {
+                _logger.LogWarning("� Rejected UDP packet from {RemoteEndPoint}: invalid length header (expected: {ExpectedLength}, actual: {ActualLength})", 
+                    remoteEndPoint, expectedLength, packetData.Length - 4);
+                return;
+            }
+            
+            // Try to decrypt with each authenticated session's crypto
+            bool decryptionSuccessful = false;
+            foreach (var session in _sessions.Values)
+            {
+                if (session?.IsAuthenticated == true && session.UdpCrypto != null)
                 {
-                    isEncryptedPacket = true;
-                    _logger.LogDebug("🔍 Detected encrypted UDP packet from {RemoteEndPoint} (expected length: {ExpectedLength}), attempting decryption", remoteEndPoint, expectedLength);
-                    
-                    // Try to decrypt with each authenticated session's crypto
-                    foreach (var session in _sessions.Values)
+                    try
                     {
-                        if (session?.IsAuthenticated == true && session.UdpCrypto != null)
+                        // Extract encrypted data (skip 4-byte length header)
+                        var encryptedData = new byte[expectedLength];
+                        Array.Copy(packetData, 4, encryptedData, 0, expectedLength);
+                        
+                        // Try to decrypt with this session's key
+                        var decryptedJson = session.UdpCrypto.Decrypt(encryptedData);
+                        if (!string.IsNullOrEmpty(decryptedJson))
                         {
-                            try
-                            {
-                                // Extract encrypted data (skip 4-byte length header)
-                                var encryptedData = new byte[expectedLength];
-                                Array.Copy(packetData, 4, encryptedData, 0, expectedLength);
-                                
-                                // Try to decrypt with this session's key
-                                var decryptedJson = session.UdpCrypto.Decrypt(encryptedData);
-                                if (!string.IsNullOrEmpty(decryptedJson))
-                                {
-                                    senderSession = session;
-                                    jsonToProcess = decryptedJson;
-                                    _logger.LogDebug("🔓 Successfully decrypted UDP packet from {RemoteEndPoint} for session {SessionId}: {DecryptedJson}", 
-                                        remoteEndPoint, session.Id, decryptedJson);
-                                    break;
-                                }
-                            }
-                            catch (Exception ex)
+                            senderSession = session;
+                            jsonToProcess = decryptedJson;
+                            decryptionSuccessful = true;
+                            _logger.LogDebug("🔓 Successfully decrypted UDP packet from {RemoteEndPoint} for session {SessionId}: {DecryptedJson}", 
+                                remoteEndPoint, session.Id, decryptedJson);
+                            break;
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        // Not encrypted with this session's key, continue trying others
+                        _logger.LogDebug("❌ Failed to decrypt UDP packet with session {SessionId}: {Error}", 
+                            session.Id, ex.Message);
+                    }
+                }
+            }
+            
+            // If we couldn't decrypt the packet, reject it completely
+            if (!decryptionSuccessful || string.IsNullOrEmpty(jsonToProcess))
+            {
+                _logger.LogWarning("🚫 Rejected UDP packet from {RemoteEndPoint}: could not decrypt with any session key. All UDP packets must be encrypted.", remoteEndPoint);
+                return;
+            }
                             {
                                 // Not encrypted with this session's key, continue trying others
                                 _logger.LogDebug("❌ Failed to decrypt UDP packet with session {SessionId}: {Error}", 
