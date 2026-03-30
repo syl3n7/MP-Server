@@ -12,11 +12,13 @@ using Microsoft.Extensions.Logging;
 using System.Numerics;
 using MP.Server;
 using MP.Server.Security;
+using MP.Server.Services;
 
 public sealed class PlayerSession : IDisposable
 {
     private readonly Socket _socket;
     private readonly RacingServer _server;
+    private readonly AuthService? _authService;
     private readonly Stream _stream;
     private readonly PipeReader _reader;
     private readonly PipeWriter _writer;
@@ -27,14 +29,17 @@ public sealed class PlayerSession : IDisposable
     public string? CurrentRoomId { get; set; }
     public string PlayerName { get; set; } = "Anonymous";
     public bool IsAuthenticated { get; set; } = false;
+    public int? AuthenticatedUserId { get; private set; }
+    public string? AuthenticatedUsername { get; private set; }
     
     // UDP Encryption
     public UdpEncryption? UdpCrypto { get; private set; }
     
-    public PlayerSession(Socket socket, RacingServer server, bool useTls = false, X509Certificate2? certificate = null)
+    public PlayerSession(Socket socket, RacingServer server, AuthService? authService = null, bool useTls = false, X509Certificate2? certificate = null)
     {
         _socket = socket;
         _server = server;
+        _authService = authService;
         _useTls = useTls;
         
         // Create network stream
@@ -179,66 +184,117 @@ public sealed class PlayerSession : IDisposable
             // Check if command requires authentication
             if (RequiresAuthentication(command) && !IsAuthenticated)
             {
-                await SendJsonAsync(new { command = "ERROR", message = "Authentication required. Please use NAME command with password." }, ct);
+                await SendJsonAsync(new { command = "ERROR", message = "Authentication required. Use REGISTER, LOGIN, or AUTO_AUTH first." }, ct);
                 return;
             }
             
             switch (command)
             {
+                case "REGISTER":
+                    // Create a new player account. Returns a persistent token.
+                    if (_authService == null)
+                    {
+                        await SendJsonAsync(new { command = "ERROR", message = "Auth service unavailable." }, ct);
+                        break;
+                    }
+                    {
+                        var username  = jsonMessage.TryGetProperty("username",  out var ru) ? ru.GetString() ?? string.Empty : string.Empty;
+                        var password  = jsonMessage.TryGetProperty("password",  out var rp) ? rp.GetString() ?? string.Empty : string.Empty;
+                        var email     = jsonMessage.TryGetProperty("email",     out var re) ? re.GetString() ?? string.Empty : string.Empty;
+                        var ip        = (_socket.RemoteEndPoint as System.Net.IPEndPoint)?.Address?.ToString();
+
+                        var result = await _authService.RegisterAsync(username, password, email, ip);
+                        if (result.Success)
+                        {
+                            AuthenticatedUserId   = result.UserId;
+                            AuthenticatedUsername = result.Username;
+                            PlayerName            = result.Username ?? "Anonymous";
+                            IsAuthenticated       = true;
+                            UdpCrypto             = new UdpEncryption(Id);
+                            _server.Logger.LogInformation("✅ REGISTER → {Username} (Id={UserId}) session={SessionId}", result.Username, result.UserId, Id);
+                            await SendJsonAsync(new { command = "REGISTER_OK", userId = result.UserId, username = result.Username, token = result.Token }, ct);
+                        }
+                        else
+                        {
+                            await SendJsonAsync(new { command = "REGISTER_FAILED", message = result.Error }, ct);
+                        }
+                    }
+                    break;
+
+                case "LOGIN":
+                    // Log in with username + password. Returns a persistent token.
+                    if (_authService == null)
+                    {
+                        await SendJsonAsync(new { command = "ERROR", message = "Auth service unavailable." }, ct);
+                        break;
+                    }
+                    {
+                        var username = jsonMessage.TryGetProperty("username", out var lu) ? lu.GetString() ?? string.Empty : string.Empty;
+                        var password = jsonMessage.TryGetProperty("password", out var lp) ? lp.GetString() ?? string.Empty : string.Empty;
+                        var ip       = (_socket.RemoteEndPoint as System.Net.IPEndPoint)?.Address?.ToString();
+
+                        var result = await _authService.LoginAsync(username, password, ip);
+                        if (result.Success)
+                        {
+                            AuthenticatedUserId   = result.UserId;
+                            AuthenticatedUsername = result.Username;
+                            PlayerName            = result.Username ?? "Anonymous";
+                            IsAuthenticated       = true;
+                            UdpCrypto             = new UdpEncryption(Id);
+                            _server.Logger.LogInformation("🔐 LOGIN → {Username} (Id={UserId}) session={SessionId}", result.Username, result.UserId, Id);
+                            await SendJsonAsync(new { command = "LOGIN_OK", userId = result.UserId, username = result.Username, token = result.Token }, ct);
+                        }
+                        else
+                        {
+                            await SendJsonAsync(new { command = "LOGIN_FAILED", message = result.Error }, ct);
+                        }
+                    }
+                    break;
+
+                case "AUTO_AUTH":
+                    // Silent re-login using a token stored by the client after a previous LOGIN/REGISTER.
+                    if (_authService == null)
+                    {
+                        await SendJsonAsync(new { command = "ERROR", message = "Auth service unavailable." }, ct);
+                        break;
+                    }
+                    {
+                        var token = jsonMessage.TryGetProperty("token", out var at) ? at.GetString() ?? string.Empty : string.Empty;
+                        var ip    = (_socket.RemoteEndPoint as System.Net.IPEndPoint)?.Address?.ToString();
+
+                        var result = await _authService.AutoAuthAsync(token, ip);
+                        if (result.Success)
+                        {
+                            AuthenticatedUserId   = result.UserId;
+                            AuthenticatedUsername = result.Username;
+                            PlayerName            = result.Username ?? "Anonymous";
+                            IsAuthenticated       = true;
+                            UdpCrypto             = new UdpEncryption(Id);
+                            _server.Logger.LogInformation("🔑 AUTO_AUTH → {Username} (Id={UserId}) session={SessionId}", result.Username, result.UserId, Id);
+                            await SendJsonAsync(new { command = "AUTO_AUTH_OK", userId = result.UserId, username = result.Username }, ct);
+                        }
+                        else
+                        {
+                            await SendJsonAsync(new { command = "AUTO_AUTH_FAILED", message = result.Error }, ct);
+                        }
+                    }
+                    break;
+
                 case "NAME":
+                    // Override display name only — authentication must already be established.
                     if (jsonMessage.TryGetProperty("name", out var nameElement))
                     {
-                        bool authenticationSuccessful = true;
-                        string rawPassword = string.Empty;
-                        
-                        // Check if password is provided for authentication
-                        if (jsonMessage.TryGetProperty("password", out var passwordElement))
+                        var displayName = nameElement.GetString();
+                        if (!string.IsNullOrWhiteSpace(displayName))
                         {
-                            rawPassword = passwordElement.GetString() ?? string.Empty;
-                            
-                            // Check if this player name already exists in the server
-                            var existingPlayer = _server.GetPlayerByName(nameElement.GetString() ?? string.Empty);
-                            
-                            if (existingPlayer != null && existingPlayer.Id != Id)
-                            {
-                                // Verify the password against stored hash
-                                authenticationSuccessful = _server.VerifyPlayerPassword(
-                                    nameElement.GetString() ?? string.Empty, 
-                                    rawPassword
-                                );
-                                
-                                if (!authenticationSuccessful)
-                                {
-                                    await SendJsonAsync(new { command = "AUTH_FAILED", message = "Invalid password for this player name." }, ct);
-                                    break;
-                                }
-                            }
-                            else
-                            {
-                                // New player or same player reconnecting - register the password
-                                _server.RegisterPlayerPassword(nameElement.GetString() ?? string.Empty, rawPassword);
-                            }
+                            PlayerName = displayName;
+                            _server.Logger.LogInformation("👤 Player {SessionId} set display name to '{Name}'", Id, PlayerName);
+                            await SendJsonAsync(new { command = "NAME_OK", name = PlayerName }, ct);
                         }
-                        
-                        PlayerName = nameElement.GetString() ?? "Anonymous";
-                        IsAuthenticated = authenticationSuccessful;
-                        
-                        // Initialize UDP encryption for authenticated users
-                        if (IsAuthenticated)
+                        else
                         {
-                            UdpCrypto = new UdpEncryption(Id);
-                            _server.Logger.LogDebug("🔐 UDP encryption initialized for session {SessionId}", Id);
+                            await SendJsonAsync(new { command = "ERROR", message = "Display name cannot be empty." }, ct);
                         }
-                        
-                        _server.Logger.LogInformation("👤 Player {SessionId} set name to '{Name}' and {AuthStatus}", 
-                            Id, PlayerName, IsAuthenticated ? "authenticated" : "is not authenticated");
-                        
-                        await SendJsonAsync(new { 
-                            command = "NAME_OK", 
-                            name = PlayerName, 
-                            authenticated = IsAuthenticated,
-                            udpEncryption = IsAuthenticated // Inform client about UDP encryption availability
-                        }, ct);
                     }
                     break;
                     
@@ -495,40 +551,6 @@ public sealed class PlayerSession : IDisposable
                     await SendJsonAsync(new { command = "BYE_OK" }, ct);
                     await DisconnectAsync();
                     break;
-                    
-                case "AUTHENTICATE":
-                    if (jsonMessage.TryGetProperty("password", out var authPasswordElement))
-                    {
-                        var password = authPasswordElement.GetString() ?? string.Empty;
-                        
-                        if (string.IsNullOrEmpty(PlayerName) || PlayerName == "Anonymous")
-                        {
-                            await SendJsonAsync(new { 
-                                command = "AUTH_FAILED", 
-                                message = "Please set your name first with the NAME command."
-                            }, ct);
-                            break;
-                        }
-                        
-                        bool authResult = _server.VerifyPlayerPassword(PlayerName, password);
-                        IsAuthenticated = authResult;
-                        
-                        if (authResult)
-                        {
-                            _server.Logger.LogInformation("🔐 Player {SessionId} ({Name}) authenticated successfully", Id, PlayerName);
-                            await SendJsonAsync(new { command = "AUTH_OK", name = PlayerName }, ct);
-                        }
-                        else
-                        {
-                            _server.Logger.LogInformation("🔒 Player {SessionId} ({Name}) authentication failed", Id, PlayerName);
-                            await SendJsonAsync(new { command = "AUTH_FAILED", message = "Invalid password." }, ct);
-                        }
-                    }
-                    else
-                    {
-                        await SendJsonAsync(new { command = "ERROR", message = "Password is required for authentication." }, ct);
-                    }
-                    break;
 
                 case "MESSAGE":
                     // Handle chat messages
@@ -575,21 +597,11 @@ public sealed class PlayerSession : IDisposable
 
     private bool RequiresAuthentication(string command)
     {
-        // List of commands that require authentication
-        switch (command)
+        return command switch
         {
-            case "NAME":
-            case "AUTHENTICATE": 
-            case "PING":
-            case "BYE":
-            case "PLAYER_INFO":
-            case "LIST_ROOMS":
-                // These commands are allowed without authentication
-                return false;
-            default:
-                // All other commands require authentication
-                return true;
-        }
+            "REGISTER" or "LOGIN" or "AUTO_AUTH" or "PING" or "BYE" or "PLAYER_INFO" or "LIST_ROOMS" => false,
+            _ => true
+        };
     }
 
     public async ValueTask SendAsync(ReadOnlyMemory<byte> data, CancellationToken ct = default)

@@ -38,10 +38,14 @@ try
         var connectionString = context.Configuration.GetSection("ConnectionStrings")["DefaultConnection"] 
             ?? "Server=localhost;Database=mpserver;User=root;Password=yourpassword;Port=3306;";
         
-        services.AddDbContext<UserDbContext>(options =>
+        // AddDbContextFactory registers both IDbContextFactory<T> (singleton) and T (scoped),
+        // allowing concurrent per-operation contexts in AuthService while keeping the
+        // scoped pattern available for DatabaseLoggingService.
+        services.AddDbContextFactory<UserDbContext>(options =>
             options.UseMySql(connectionString, ServerVersion.AutoDetect(connectionString)));
         
         services.AddScoped<DatabaseLoggingService>();
+        services.AddSingleton<AuthService>();
         services.AddHostedService<LogCleanupService>();
     });
 
@@ -50,7 +54,8 @@ try
     // Initialize database
     using (var scope = host.Services.CreateScope())
     {
-        var context = scope.ServiceProvider.GetRequiredService<UserDbContext>();
+        var dbFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<UserDbContext>>();
+        await using var context = await dbFactory.CreateDbContextAsync();
         await context.Database.EnsureCreatedAsync();
         Console.WriteLine("✅ Database initialized");
     }
@@ -59,6 +64,7 @@ try
     using var serverScope = host.Services.CreateScope();
     var logger = serverScope.ServiceProvider.GetRequiredService<ILogger<RacingServer>>();
     var dbLoggingService = serverScope.ServiceProvider.GetRequiredService<DatabaseLoggingService>();
+    var authService = host.Services.GetRequiredService<AuthService>();
     
     // Server configuration
     const int tcpPort = 443;
@@ -70,7 +76,7 @@ try
     Console.WriteLine($"   UDP Port: {udpPort}");
     Console.WriteLine($"   TLS: {(useTls ? "Enabled" : "Disabled")}");
     
-    var server = new RacingServer(tcpPort, udpPort, logger, useTls, null, null, dbLoggingService);
+    var server = new RacingServer(tcpPort, udpPort, logger, useTls, null, null, dbLoggingService, authService);
     
     // Start server
     await server.StartAsync(serverCts.Token);

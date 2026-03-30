@@ -232,48 +232,36 @@ public async Task<bool> ConnectToServer(string host, int port = 443)
 
 ## 5. Authentication Flow
 
+The server uses **DB-backed, persistent, token-based authentication**. The old `NAME+password` / `AUTHENTICATE` flow has been removed.
+
 ### 5.1 Registration (First Time)
 
 ```csharp
-public async Task<AuthResult> RegisterPlayer(string username, string password)
+public async Task<AuthResult> RegisterPlayer(string username, string password, string email = "")
 {
     try
     {
-        var command = new
-        {
-            command = "NAME",
-            name = username,
-            password = password
-        };
-        
+        var command = new { command = "REGISTER", username, password, email };
         await SendCommand(command);
         string response = await _reader.ReadLineAsync();
         
         var result = JsonSerializer.Deserialize<JsonElement>(response);
         string cmd = result.GetProperty("command").GetString();
         
-        if (cmd == "NAME_OK")
+        if (cmd == "REGISTER_OK")
         {
-            bool authenticated = result.GetProperty("authenticated").GetBoolean();
-            bool udpEncryption = result.TryGetProperty("udpEncryption", out var udpEl) && udpEl.GetBoolean();
+            int userId     = result.GetProperty("userId").GetInt32();
+            string uname   = result.GetProperty("username").GetString();
+            string token   = result.GetProperty("token").GetString();
             
-            if (authenticated)
-            {
-                _isAuthenticated = true;
-                if (udpEncryption)
-                {
-                    SetupUdpEncryption();
-                }
-                return AuthResult.Success;
-            }
-        }
-        else if (cmd == "AUTH_FAILED")
-        {
-            string message = result.GetProperty("message").GetString();
-            return AuthResult.Failed(message);
+            _isAuthenticated = true;
+            SaveTokenLocally(token);   // persist for AUTO_AUTH
+            SetupUdpEncryption();      // UDP keys activated after auth
+            return AuthResult.Success;
         }
         
-        return AuthResult.Failed("Unknown response");
+        string message = result.TryGetProperty("message", out var msg) ? msg.GetString() : "Registration failed";
+        return AuthResult.Failed(message);
     }
     catch (Exception ex)
     {
@@ -287,41 +275,76 @@ public async Task<AuthResult> RegisterPlayer(string username, string password)
 ```csharp
 public async Task<AuthResult> LoginPlayer(string username, string password)
 {
-    // Same as registration - server automatically detects if username exists
-    return await RegisterPlayer(username, password);
+    try
+    {
+        var command = new { command = "LOGIN", username, password };
+        await SendCommand(command);
+        string response = await _reader.ReadLineAsync();
+        
+        var result = JsonSerializer.Deserialize<JsonElement>(response);
+        string cmd = result.GetProperty("command").GetString();
+        
+        if (cmd == "LOGIN_OK")
+        {
+            string token = result.GetProperty("token").GetString();
+            _isAuthenticated = true;
+            SaveTokenLocally(token);
+            SetupUdpEncryption();
+            return AuthResult.Success;
+        }
+        
+        string message = result.TryGetProperty("message", out var msg) ? msg.GetString() : "Login failed";
+        return AuthResult.Failed(message);
+    }
+    catch (Exception ex)
+    {
+        return AuthResult.Failed($"Login error: {ex.Message}");
+    }
 }
 ```
 
-### 5.3 Separate Authentication
+### 5.3 Auto-Auth on Reconnect (Token-Based)
+
+Clients should store the token returned by `REGISTER_OK` / `LOGIN_OK` and attempt `AUTO_AUTH` on every reconnect before prompting for credentials:
 
 ```csharp
-public async Task<AuthResult> AuthenticateWithPassword(string password)
+public async Task<AuthResult> TryAutoAuth()
 {
+    string token = LoadTokenLocally();
+    if (string.IsNullOrEmpty(token)) return AuthResult.Failed("No stored token");
+    
     try
     {
-        var command = new { command = "AUTHENTICATE", password = password };
-        await SendCommand(command);
-        
+        await SendCommand(new { command = "AUTO_AUTH", token });
         string response = await _reader.ReadLineAsync();
         var result = JsonSerializer.Deserialize<JsonElement>(response);
         
-        if (result.GetProperty("command").GetString() == "AUTH_OK")
+        if (result.GetProperty("command").GetString() == "AUTO_AUTH_OK")
         {
             _isAuthenticated = true;
             SetupUdpEncryption();
             return AuthResult.Success;
         }
-        else
-        {
-            string message = result.GetProperty("message").GetString();
-            return AuthResult.Failed(message);
-        }
+        
+        // Token expired or revoked — fall back to LOGIN
+        DeleteStoredToken();
+        string message = result.TryGetProperty("message", out var msg) ? msg.GetString() : "Token invalid";
+        return AuthResult.Failed(message);
     }
     catch (Exception ex)
     {
-        return AuthResult.Failed($"Authentication error: {ex.Message}");
+        return AuthResult.Failed($"Auto-auth error: {ex.Message}");
     }
 }
+```
+
+Recommended connect sequence:
+```
+1. Connect (TLS)
+2. TryAutoAuth()   → if SUCCESS: ready to play
+3.             → if FAILED: show login/register UI
+4. LoginPlayer() or RegisterPlayer()
+5. Ready to play
 ```
 
 ### 5.4 Authentication State Management
@@ -1126,14 +1149,16 @@ func read_line() -> String:
 
 **Symptoms:**
 ```json
-{"command":"AUTH_FAILED","message":"Invalid password for this player name."}
-{"command":"ERROR","message":"Authentication required. Please use NAME command with password."}
+{"command":"REGISTER_FAILED","message":"Username already taken."}
+{"command":"LOGIN_FAILED","message":"Invalid username or password."}
+{"command":"AUTO_AUTH_FAILED","message":"Token invalid or expired."}
+{"command":"ERROR","message":"Authentication required. Use REGISTER, LOGIN, or AUTO_AUTH first."}
 ```
 
 **Solutions:**
-1. **Check Password Storage**: Ensure client stores/sends exact password
-2. **Username Case Sensitivity**: Server may be case-sensitive for usernames
-3. **Special Characters**: Ensure proper UTF-8 encoding for passwords
+1. On `AUTO_AUTH_FAILED`: delete stored token and prompt for `LOGIN`
+2. On `LOGIN_FAILED` repeated: account may be locked (3 failed attempts → 30-min lock)
+3. On `REGISTER_FAILED` "Username already taken": choose a different username or `LOGIN`
 4. **First-Time Registration**: Verify first connection creates the account
 
 #### UDP Encryption Issues

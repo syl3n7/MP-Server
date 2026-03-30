@@ -31,22 +31,43 @@ await tcpClient.ConnectAsync("server_ip", 443); // Missing TLS!
 
 ### 2. **Authentication Flow (CRITICAL)**
 
-**Step 1: Set Player Name**
+The server uses **persistent, DB-backed, token-based authentication**. There is no longer a `NAME+password` combo or a separate `AUTHENTICATE` command.
+
+**First time — Register:**
 ```json
-{"command":"NAME","name":"YourPlayerName"}
+{"command":"REGISTER","username":"YourPlayerName","password":"YourPassword","email":"you@example.com"}
+```
+Server response:
+```json
+{"command":"REGISTER_OK","userId":123,"username":"YourPlayerName","token":"<base64-token>"}
 ```
 
-**Step 2: Authenticate with Password**
+**Returning player — Login:**
 ```json
-{"command":"AUTHENTICATE","password":"YourPassword"}
+{"command":"LOGIN","username":"YourPlayerName","password":"YourPassword"}
+```
+Server response:
+```json
+{"command":"LOGIN_OK","userId":123,"username":"YourPlayerName","token":"<base64-token>"}
 ```
 
-**Step 3: Server Response (UDP Key Generation)**
-```json
-{"command":"AUTH_OK","message":"Authentication successful. UDP encryption enabled."}
-```
+**⚠️ CRITICAL**: After a successful `REGISTER_OK` or `LOGIN_OK` the server activates UDP encryption for the session. UDP packets MUST be encrypted from this point forward.
 
-⚠️ **CRITICAL**: After authentication, the server generates UDP encryption keys. UDP packets MUST be encrypted from this point forward.
+**Store the token and reuse it — Auto-auth on reconnect:**
+```json
+{"command":"AUTO_AUTH","token":"<base64-token>"}
+```
+Server response:
+```json
+{"command":"AUTO_AUTH_OK","userId":123,"username":"YourPlayerName"}
+```
+Tokens are valid for **30 days**. On expiry, fall back to `LOGIN`.
+
+**Optional — Override display name (after auth):**
+```json
+{"command":"NAME","name":"SpeedyDriver"}
+```
+Response: `{"command":"NAME_OK","name":"SpeedyDriver"}`
 
 ### 3. **UDP Encryption Implementation (MANDATORY)**
 
@@ -147,7 +168,7 @@ public class RacingNetworkClient
     {
         if (!_isAuthenticated || _udpEncryption == null)
         {
-            throw new InvalidOperationException("Must authenticate before sending UDP packets");
+            throw new InvalidOperationException("Must call REGISTER, LOGIN, or AUTO_AUTH before sending UDP packets");
         }
         
         var updateData = new
@@ -168,7 +189,7 @@ public class RacingNetworkClient
         await _udpClient.SendAsync(encryptedData, encryptedData.Length, serverEndpoint);
     }
     
-    private async Task OnAuthenticationSuccess(string sessionId)
+    private async Task OnAuthSuccess(int userId, string username, string token, string sessionId)
     {
         _sessionId = sessionId;
         _isAuthenticated = true;
@@ -176,7 +197,10 @@ public class RacingNetworkClient
         // Initialize UDP encryption with session ID
         _udpEncryption = new UdpEncryption(sessionId);
         
-        Debug.Log("UDP encryption initialized for session: " + sessionId);
+        // Persist the token for AUTO_AUTH on next connect
+        SaveTokenLocally(token);
+
+        Debug.Log($"Session active: userId={userId} username={username}");
     }
 }
 ```
@@ -282,12 +306,14 @@ Debug.Log($"Decrypted: {decrypted}");
 ## 📋 **CLIENT IMPLEMENTATION CHECKLIST**
 
 - [ ] **TLS/SSL TCP connection on port 443**
-- [ ] **Complete authentication flow (NAME → AUTHENTICATE → AUTH_OK)**
+- [ ] **REGISTER new account (first run) or LOGIN (returning player)**
+- [ ] **Store token locally; use AUTO_AUTH on subsequent connects**
 - [ ] **UDP encryption implementation with AES-256**
 - [ ] **Session ID tracking after authentication**
 - [ ] **Proper JSON serialization without BOM**
 - [ ] **Encrypted UDP packet transmission**
-- [ ] **Error handling for authentication failures**
+- [ ] **Error handling for auth failures (REGISTER_FAILED, LOGIN_FAILED, AUTO_AUTH_FAILED)**
+- [ ] **Fallback from AUTO_AUTH → LOGIN when token expires (30 days)**
 - [ ] **Room creation and joining**
 - [ ] **Game start handling with spawn positions**
 - [ ] **Position update broadcasting**
@@ -297,10 +323,11 @@ Debug.Log($"Decrypted: {decrypted}");
 ## 🚨 **CRITICAL SECURITY NOTES**
 
 1. **Never send unencrypted UDP packets after authentication**
-2. **Always validate authentication success before UDP transmission**
+2. **Always validate auth success (REGISTER_OK / LOGIN_OK / AUTO_AUTH_OK) before UDP transmission**
 3. **Use the exact shared secret: `"RacingServerUDP2024!"`**
 4. **Session ID must match TCP session ID exactly**
-5. **All UDP communication must be encrypted**
+5. **Store the auth token securely; do not expose it in logs**
+6. **After 3 failed LOGIN attempts the account is locked for 30 minutes**
 
 ---
 
@@ -311,14 +338,17 @@ Debug.Log($"Decrypted: {decrypted}");
 - Use plain text UDP after authentication  
 - Include UTF-8 BOM in JSON strings
 - Manually build JSON strings
-- Ignore authentication errors
+- Ignore authentication error responses
+- Reuse a token after it has expired (30 days)
+- Try to use `NAME+password` or `AUTHENTICATE` — those commands are removed
 
 ✅ **Do:**
-- Complete full authentication flow first
+- Register once, then persist the token for AUTO_AUTH
 - Encrypt all UDP packets with session-specific keys
 - Use proper JSON serialization libraries
 - Handle all error responses from server
 - Test encryption/decryption locally first
+- Implement token refresh: on `AUTO_AUTH_FAILED`, call `LOGIN` to get a new token
 
 ---
 

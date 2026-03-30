@@ -170,39 +170,54 @@ public class UdpEncryption
 
 ## 🔐 Authentication Flow
 
-### Step 1: Set Player Name with Password
+The server uses **DB-backed, persistent, token-based authentication**. The old `NAME+password` / `AUTHENTICATE` combo has been removed.
 
-**Client Request:**
+### Step 1 — Register (first time) or Login
+
+**Register:**
 ```json
 {
-  "command": "NAME",
-  "name": "PlayerName",
-  "password": "YourPassword"
+  "command": "REGISTER",
+  "username": "PlayerName",
+  "password": "YourPassword",
+  "email": "you@example.com"
 }
 ```
-
 **Server Response (Success):**
 ```json
 {
-  "command": "NAME_OK",
-  "name": "PlayerName",
-  "authenticated": true,
-  "udpEncryption": true
+  "command": "REGISTER_OK",
+  "userId": 123,
+  "username": "PlayerName",
+  "token": "<base64-token>"
 }
 ```
+**Server Response (Failure):** `{"command":"REGISTER_FAILED","message":"Username already taken."}`
 
-**Server Response (Failure):**
+**Login (returning player):**
 ```json
 {
-  "command": "AUTH_FAILED",
-  "message": "Invalid password for this player name."
+  "command": "LOGIN",
+  "username": "PlayerName",
+  "password": "YourPassword"
 }
 ```
+**Server Response (Success):**
+```json
+{
+  "command": "LOGIN_OK",
+  "userId": 123,
+  "username": "PlayerName",
+  "token": "<base64-token>"
+}
+```
+**Server Response (Failure):** `{"command":"LOGIN_FAILED","message":"Invalid username or password."}`
+> After **3 consecutive failures** the account is locked for **30 minutes**.
 
-### Step 2: Initialize UDP Encryption
+### Step 2 — Persist the token and Initialize UDP Encryption
 
 ```csharp
-private async Task OnAuthenticationSuccess(string sessionId)
+private async Task OnAuthSuccess(int userId, string username, string token, string sessionId)
 {
     _sessionId = sessionId;
     _isAuthenticated = true;
@@ -210,29 +225,27 @@ private async Task OnAuthenticationSuccess(string sessionId)
     // MANDATORY: Initialize UDP encryption
     _udpEncryption = new UdpEncryption(sessionId);
     
-    Console.WriteLine("UDP encryption initialized for session: " + sessionId);
+    // Persist token so we can AUTO_AUTH next time
+    SaveTokenLocally(token);
 }
 ```
 
-### Step 3: Alternative Authentication
+### Step 3 — Auto-Auth on Reconnect (Token-Based)
 
-If name is set without password first:
+On every reconnect, try `AUTO_AUTH` before showing a login screen:
 
-**Client Request:**
 ```json
 {
-  "command": "AUTHENTICATE",
-  "password": "YourPassword"
+  "command": "AUTO_AUTH",
+  "token": "<stored-base64-token>"
 }
 ```
+**Server Response (Success):** `{"command":"AUTO_AUTH_OK","userId":123,"username":"PlayerName"}`
+**Server Response (Failure):** `{"command":"AUTO_AUTH_FAILED","message":"Token invalid or expired."}`
 
-**Server Response:**
-```json
-{
-  "command": "AUTH_OK",
-  "name": "PlayerName"
-}
-```
+On `AUTO_AUTH_FAILED`: discard the expired token and fall back to `LOGIN`.
+
+Tokens are valid for **30 days**.
 
 ---
 
@@ -241,8 +254,9 @@ If name is set without password first:
 ### Commands That Require Authentication
 
 **❌ Unauthenticated** players can only use:
-- `NAME`
-- `AUTHENTICATE`
+- `REGISTER`
+- `LOGIN`
+- `AUTO_AUTH`
 - `PING`
 - `BYE`
 - `PLAYER_INFO`
@@ -350,8 +364,10 @@ If name is set without password first:
 
 | Command | Direction | Request Format | Response Format | Auth Required |
 |---------|-----------|----------------|-----------------|---------------|
-| `NAME` | Client→Server | `{"command":"NAME","name":"player","password":"secret"}` | `{"command":"NAME_OK","name":"player","authenticated":true,"udpEncryption":true}` | No |
-| `AUTHENTICATE` | Client→Server | `{"command":"AUTHENTICATE","password":"secret"}` | `{"command":"AUTH_OK","name":"player"}` | No |
+| `REGISTER` | Client→Server | `{"command":"REGISTER","username":"name","password":"pw","email":"e@x"}` | `{"command":"REGISTER_OK","userId":1,"username":"name","token":"..."}` | No |
+| `LOGIN` | Client→Server | `{"command":"LOGIN","username":"name","password":"pw"}` | `{"command":"LOGIN_OK","userId":1,"username":"name","token":"..."}` | No |
+| `AUTO_AUTH` | Client→Server | `{"command":"AUTO_AUTH","token":"..."}` | `{"command":"AUTO_AUTH_OK","userId":1,"username":"name"}` | No |
+| `NAME` | Client→Server | `{"command":"NAME","name":"DisplayName"}` | `{"command":"NAME_OK","name":"DisplayName"}` | **Yes** |
 | `CREATE_ROOM` | Client→Server | `{"command":"CREATE_ROOM","name":"roomName"}` | `{"command":"ROOM_CREATED","roomId":"id","name":"roomName"}` | Yes |
 | `JOIN_ROOM` | Client→Server | `{"command":"JOIN_ROOM","roomId":"id"}` | `{"command":"JOIN_OK","roomId":"id"}` | Yes |
 | `LEAVE_ROOM` | Client→Server | `{"command":"LEAVE_ROOM"}` | `{"command":"LEAVE_OK","roomId":"id"}` | Yes |
@@ -886,7 +902,8 @@ public async Task SendUdpWithLogging(object data)
 ### Client Implementation Checklist
 
 - [ ] **TLS/SSL TCP connection on port 443**
-- [ ] **Complete authentication flow (NAME → AUTH_OK)**
+- [ ] **REGISTER (first run) or LOGIN (returning player) or AUTO_AUTH (token stored)**
+- [ ] **Persist token locally; use AUTO_AUTH on reconnect; fallback to LOGIN on expiry**
 - [ ] **UDP encryption implementation with AES-256**
 - [ ] **Session ID tracking after authentication**
 - [ ] **Proper JSON serialization without BOM**

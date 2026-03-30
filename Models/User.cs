@@ -158,4 +158,36 @@ namespace MP.Server.Models
         
         public DateTime Timestamp { get; set; } = DateTime.UtcNow;
     }
+
+    /// <summary>
+    /// Persistent auto-auth token. Raw token is returned to client once and never stored.
+    /// Only a SHA-256 hash of the token is persisted here.
+    /// </summary>
+    [Index(nameof(TokenHash), IsUnique = true)]
+    public class UserAuthToken
+    {
+        [Key]
+        public int Id { get; set; }
+
+        [Required]
+        public int UserId { get; set; }
+
+        [ForeignKey("UserId")]
+        public User User { get; set; } = null!;
+
+        /// <summary>SHA-256 hash of the raw token. Never store the raw token.</summary>
+        [Required]
+        [StringLength(512)]
+        public string TokenHash { get; set; } = string.Empty;
+
+        public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+        public DateTime ExpiresAt { get; set; }
+        public DateTime? LastUsedAt { get; set; }
+        public bool IsRevoked { get; set; } = false;
+
+        [StringLength(45)]
+        public string? CreatedFromIp { get; set; }
+
+        public bool IsValid => !IsRevoked && ExpiresAt > DateTime.UtcNow;
+    }
 }

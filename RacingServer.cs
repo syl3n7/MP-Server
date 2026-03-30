@@ -39,8 +39,8 @@ public sealed class RacingServer : IHostedService, IDisposable
     private readonly ConcurrentDictionary<string, PlayerSession> _sessions = new();
     private readonly ConcurrentDictionary<string, GameRoom> _rooms = new();
     
-    // Player authentication storage
-    private readonly ConcurrentDictionary<string, string> _playerPasswordHashes = new();
+    // DB-backed authentication service
+    private readonly AuthService? _authService;
     
     // TLS/SSL Configuration
     private readonly bool _useTls;
@@ -58,8 +58,9 @@ public sealed class RacingServer : IHostedService, IDisposable
     public SecurityManager SecurityManager => _securityManager;
     public DatabaseLoggingService? DatabaseLoggingService => _dbLoggingService;
     
-    public RacingServer(int tcpPort, int udpPort, ILogger<RacingServer>? logger = null, bool useTls = true, X509Certificate2? certificate = null, SecurityConfig? securityConfig = null, DatabaseLoggingService? dbLoggingService = null)
+    public RacingServer(int tcpPort, int udpPort, ILogger<RacingServer>? logger = null, bool useTls = true, X509Certificate2? certificate = null, SecurityConfig? securityConfig = null, DatabaseLoggingService? dbLoggingService = null, AuthService? authService = null)
     {
+        _authService = authService;
         _tcpPort = tcpPort;
         _udpPort = udpPort;
         _logger = logger ?? LoggerFactory.Create(b => b.AddConsole()).CreateLogger<RacingServer>();
@@ -225,7 +226,7 @@ public sealed class RacingServer : IHostedService, IDisposable
         var endpoint = socket.RemoteEndPoint as IPEndPoint;
         
         using (socket)
-        using (var session = new PlayerSession(socket, this, _useTls, _serverCertificate))
+        using (var session = new PlayerSession(socket, this, _authService, _useTls, _serverCertificate))
         {
             try
             {
@@ -797,56 +798,6 @@ public sealed class RacingServer : IHostedService, IDisposable
         }
     }
 
-    // Authentication Methods
-    public void RegisterPlayerPassword(string playerName, string password)
-    {
-        if (string.IsNullOrEmpty(playerName) || string.IsNullOrEmpty(password))
-        {
-            return;
-        }
-
-        string passwordHash = HashPassword(password);
-        _playerPasswordHashes[playerName] = passwordHash;
-        _logger.LogDebug("🔐 Registered password for player {PlayerName}", playerName);
-    }
-    
-    public bool VerifyPlayerPassword(string playerName, string password)
-    {
-        if (string.IsNullOrEmpty(playerName) || string.IsNullOrEmpty(password))
-        {
-            return false;
-        }
-        
-        // If no password registered for this player, any password is valid (first time setup)
-        if (!_playerPasswordHashes.TryGetValue(playerName, out var storedHash))
-        {
-            return true;
-        }
-        
-        string passwordHash = HashPassword(password);
-        bool match = storedHash.Equals(passwordHash, StringComparison.Ordinal);
-        
-        _logger.LogDebug("🔍 Password verification for {PlayerName}: {Result}", 
-            playerName, match ? "Successful" : "Failed");
-        
-        return match;
-    }
-    
-    private string HashPassword(string password)
-    {
-        // Simple hashing using SHA-256
-        // A more robust solution would use a dedicated password hashing algorithm with salt
-        using var sha256 = SHA256.Create();
-        var bytes = sha256.ComputeHash(Encoding.UTF8.GetBytes(password));
-        return Convert.ToBase64String(bytes);
-    }
-    
-    public PlayerSession? GetPlayerByName(string playerName)
-    {
-        return _sessions.Values.FirstOrDefault(s => 
-            s.PlayerName.Equals(playerName, StringComparison.OrdinalIgnoreCase));
-    }
-    
     // Certificate Management Methods
     private X509Certificate2? GenerateOrLoadCertificate()
     {

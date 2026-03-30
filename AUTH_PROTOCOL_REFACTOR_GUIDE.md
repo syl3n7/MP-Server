@@ -62,6 +62,55 @@ This guide consolidates the authentication refactor with your research requireme
 
 ---
 
+## 9. Layer Separation (Clean Architecture)
+
+Each layer has a single responsibility and only depends on layers below it. No layer imports from a higher layer.
+
+### Layer Map
+
+```
+Models/          ← Domain entities, DTOs, enums  (no project dependencies)
+Data/            ← EF DbContext, migrations       (depends on: Models)
+Services/        ← Business logic, AuthService    (depends on: Data, Models)
+Security/        ← Rate limiting, anti-cheat      (depends on: Models)
+Protocol/        ← Command routing, handlers      (depends on: Services, Models)
+Transport/       ← TCP/UDP I/O, TLS, PlayerSession (depends on: Protocol, Security)
+Observability/   ← Logging, metrics               (cross-cutting, used by any layer)
+```
+
+### Dependency Rules
+- **Models/** — no imports from any other server layer.
+- **Data/** — imports only Models and EF packages.
+- **Services/** — imports Data and Models. No socket or session references.
+- **Security/** — imports Models only. No DB calls in hot packet path.
+- **Protocol/** — imports Services and Models. Handles command dispatch and payload parsing.
+- **Transport/** (`RacingServer`, `PlayerSession`) — imports Protocol and Security. Drives I/O only — no business logic.
+- **Observability/** — cross-cutting. May be referenced by any layer.
+
+### File Moves Required
+
+| Current location | Target layer | Status |
+|---|---|---|
+| `Models/User.cs` | `Models/` | ✅ Already correct |
+| `Models/PlayerInfo.cs` | `Models/` | ✅ Already correct |
+| `Models/LogModels.cs` | `Models/` | ✅ Already correct |
+| `Data/UserDbContext.cs` | `Data/` | ✅ Already correct |
+| `Services/AuthService.cs` | `Services/` | 🆕 New file this iteration |
+| `Services/DatabaseLoggingService.cs` | `Services/` | ✅ Already correct |
+| `Services/LogCleanupService.cs` | `Services/` | ✅ Already correct |
+| `Security/SecurityManager.cs` | `Security/` | ✅ Already correct |
+| `Security/PacketValidator.cs` | `Security/` | ✅ Already correct |
+| `Security/RateLimiter.cs` | `Security/` | ✅ Already correct |
+| `Security/UdpEncryption.cs` | `Security/` | ✅ Already correct |
+| `PlayerSession.cs` | `Transport/` | 🔜 Future move |
+| `RacingServer.cs` | `Transport/` | 🔜 Future move |
+| `GameRoom.cs` | `Domain/` | 🔜 Future move |
+| `ConsoleUI.cs` | `Observability/` | 🔜 Future move |
+
+> Physical file/folder moves and namespace updates are a separate structural pass. This iteration enforces correct dependency direction within the existing file layout.
+
+---
+
 ## Example Protocol Messages
 
 ### Envelope (all messages)

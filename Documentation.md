@@ -4,7 +4,14 @@
 MP-Server is a high-performance, secure TCP/UDP multiplayer racing game server with enterprise-grade security features.  
 Clients connect over TLS-encrypted TCP (for commands, room management, chat) and send/receive AES-encrypted UDP packets (for real‐time position updates).
 
-**Latest Updates (June 2025):**
+**Latest Updates (March 2026):**
+- ✅ **AUTH REFACTOR**: Replaced in-memory SHA-256 auth with DB-backed BCrypt + persistent token system
+- ✅ **NEW COMMANDS**: `REGISTER`, `LOGIN`, `AUTO_AUTH` replace old `NAME+password` / `AUTHENTICATE` flow
+- ✅ **PERSISTENT SESSIONS**: Clients receive a 30-day token on login/register; `AUTO_AUTH` reconnects silently
+- ✅ **LAYER SEPARATION**: Services, Security, Transport layers now have explicit dependency boundaries
+- ✅ **AuthService**: New `Services/AuthService.cs` owns all auth business logic (lockout, audit log, token lifecycle)
+
+**Previous Updates (June 2025):**
 - ✅ **SECURITY ENHANCED**: Comprehensive packet validation and anti-cheat system
 - ✅ **PERFORMANCE**: Advanced rate limiting and DDoS protection
 - ✅ **MONITORING**: Real-time web dashboard with security analytics
@@ -43,7 +50,7 @@ Ports (defaults):
   - Player threat level tracking and visualization
   - Rate limit utilization monitoring per client
   - Security statistics with event type breakdown
-- **Player authentication**: SHA-256 password hashing with session management
+- **Player authentication**: BCrypt password hashing, DB-backed `UserAuthTokens` table, persistent 30-day tokens, account lockout after 3 failed attempts (30-min lock)
 - **Session isolation**: Each player gets unique encryption keys and validation state
 - **Administrative controls**: Web-based security management interface
   - Player banning with customizable reasons
@@ -94,6 +101,26 @@ Ports (defaults):
 
 **Status**: ✅ **RESOLVED** - All players now receive proper spawn positions
 
+### 1.2.3 Authentication System Refactor (March 2026)
+**Change**: Replaced the in-memory, SHA-256, first-come-first-served auth with a fully persistent, DB-backed system.
+
+**Old flow (removed)**:
+- `NAME` + optional `password` field auto-registered or authenticated based on whether the username was seen before
+- `AUTHENTICATE` command for post-name auth
+- Passwords hashed with unsalted SHA-256
+- All state lost on server restart
+
+**New flow**:
+- `REGISTER` → creates account, returns persistent token
+- `LOGIN` → validates credentials, returns persistent token
+- `AUTO_AUTH` → validates stored token, silently re-authenticates on reconnect
+- `NAME` → display-name override only (requires prior authentication)
+- Passwords hashed with BCrypt; tokens hashed with SHA-256 before DB storage
+- Account lockout: 3 failed attempts → 30-minute lock
+- Token expiry: 30 days
+
+**Status**: ✅ **LIVE** — `Services/AuthService.cs`, `Models/UserAuthToken`, `Data/UserDbContext` updated
+
 ## 2. Prerequisites
 - .NET 9.0 runtime
 - A TLS-capable TCP socket library
@@ -127,36 +154,68 @@ Ports (defaults):
 - Implement certificate validation callbacks
 
 ### 3.2 Authentication
-The server supports a simple authentication system to protect player identities:
+The server uses DB-backed, token-based persistent authentication. There are three auth commands; all other gameplay commands require a valid session.
 
-1. **During Registration** (first time using a username):
-   - When setting a player name for the first time, a password can be provided
-   - Example: `{"command":"NAME","name":"playerName","password":"secretPassword"}`
+#### 3.2.1 Register a new account
+```json
+{ "command": "REGISTER", "username": "player1", "password": "hunter2", "email": "p1@example.com" }
+```
+Success response:
+```json
+{ "command": "REGISTER_OK", "userId": 123, "username": "player1", "token": "<base64-token>" }
+```
+Failure: `{ "command": "REGISTER_FAILED", "message": "Username already taken." }`
 
-2. **During Login** (using an existing username):
-   - When connecting with a previously used name, password verification is required
-   - Example: `{"command":"NAME","name":"playerName","password":"secretPassword"}`
+#### 3.2.2 Log in to an existing account
+```json
+{ "command": "LOGIN", "username": "player1", "password": "hunter2" }
+```
+Success response:
+```json
+{ "command": "LOGIN_OK", "userId": 123, "username": "player1", "token": "<base64-token>" }
+```
+Failure: `{ "command": "LOGIN_FAILED", "message": "Invalid username or password." }`
 
-3. **Separate Authentication**:
-   - Players can also set their name first, then authenticate separately
-   - Example: `{"command":"AUTHENTICATE","password":"secretPassword"}`
+> After 3 consecutive failures the account is locked for 30 minutes.
 
-4. **Command Restrictions**:
-   - Unauthenticated players can only use: NAME, AUTHENTICATE, PING, BYE, PLAYER_INFO, LIST_ROOMS
-   - All other commands require authentication
-   - Attempting restricted commands without auth returns an error
+#### 3.2.3 Auto-auth on reconnect (token-based)
+Clients should persist the token returned by `REGISTER_OK` / `LOGIN_OK` locally and send it on every reconnect:
+```json
+{ "command": "AUTO_AUTH", "token": "<base64-token>" }
+```
+Success response:
+```json
+{ "command": "AUTO_AUTH_OK", "userId": 123, "username": "player1" }
+```
+Failure: `{ "command": "AUTO_AUTH_FAILED", "message": "Token invalid or expired." }`
 
-5. **UDP Encryption Setup**:
-   - Once authenticated via TCP, players receive unique UDP encryption keys
-   - UDP packets from authenticated players are automatically encrypted with AES-256
-   - The server can handle both encrypted and plain-text UDP packets for backward compatibility
+Tokens expire after **30 days**. On expiry the client should fall back to `LOGIN`.
+
+#### 3.2.4 Override display name (post-auth)
+After authenticating, a player may set a different in-game display name:
+```json
+{ "command": "NAME", "name": "SpeedyPlayer" }
+```
+Response: `{ "command": "NAME_OK", "name": "SpeedyPlayer" }`
+
+#### 3.2.5 Command restrictions
+- Commands allowed **without** authentication: `REGISTER`, `LOGIN`, `AUTO_AUTH`, `PING`, `BYE`, `PLAYER_INFO`, `LIST_ROOMS`
+- All other commands require a successful `REGISTER`, `LOGIN`, or `AUTO_AUTH` first.
+- Attempting a restricted command unauthenticated returns:
+  `{ "command": "ERROR", "message": "Authentication required. Use REGISTER, LOGIN, or AUTO_AUTH first." }`
+
+#### 3.2.6 UDP Encryption Setup
+- Once authenticated, the session has a `UdpCrypto` key initialized automatically.
+- All subsequent UDP packets from that session must be AES-256-CBC encrypted.
 
 ### 3.3 Supported Commands
 
 | Command        | Direction    | Payload (JSON)                                    | Response (JSON)                         | Requires Auth |
 | -------------- | ------------ | ------------------------------------------------- | --------------------------------------- | ------------- |
-| `NAME`         | Client → Srv | `{"command":"NAME","name":"playerName","password":"secret"}` | `{"command":"NAME_OK","name":"playerName","authenticated":true,"udpEncryption":true}` or `{"command":"AUTH_FAILED","message":"Invalid password for this player name."}` | No |
-| `AUTHENTICATE` | Client → Srv | `{"command":"AUTHENTICATE","password":"secret"}` | `{"command":"AUTH_OK","name":"playerName"}` or `{"command":"AUTH_FAILED","message":"Invalid password."}` | No |
+| `REGISTER`     | Client → Srv | `{"command":"REGISTER","username":"name","password":"pw","email":"e@x.com"}` | `{"command":"REGISTER_OK","userId":1,"username":"name","token":"..."}` or `{"command":"REGISTER_FAILED","message":"..."}` | No |
+| `LOGIN`        | Client → Srv | `{"command":"LOGIN","username":"name","password":"pw"}` | `{"command":"LOGIN_OK","userId":1,"username":"name","token":"..."}` or `{"command":"LOGIN_FAILED","message":"..."}` | No |
+| `AUTO_AUTH`    | Client → Srv | `{"command":"AUTO_AUTH","token":"..."}` | `{"command":"AUTO_AUTH_OK","userId":1,"username":"name"}` or `{"command":"AUTO_AUTH_FAILED","message":"..."}` | No |
+| `NAME`         | Client → Srv | `{"command":"NAME","name":"DisplayName"}` | `{"command":"NAME_OK","name":"DisplayName"}` | **Yes** |
 | `CREATE_ROOM`  | Client → Srv | `{"command":"CREATE_ROOM","name":"roomName"}`   | `{"command":"ROOM_CREATED","roomId":"id","name":"roomName"}` | Yes |
 | `JOIN_ROOM`    | Client → Srv | `{"command":"JOIN_ROOM","roomId":"id"}`         | `{"command":"JOIN_OK","roomId":"id"}` or `{"command":"ERROR","message":"Failed to join room. Room may be full or inactive."}` | Yes |
 | `LEAVE_ROOM`   | Client → Srv | `{"command":"LEAVE_ROOM"}`                      | `{"command":"LEAVE_OK","roomId":"id"}` or `{"command":"ERROR","message":"Cannot leave room. No room joined."}` | Yes |
@@ -176,12 +235,12 @@ The server may also send these messages without a direct client request:
 | ------- | ------- | ------ |
 | `RELAYED_MESSAGE` | Message relayed from another player | `{"command":"RELAYED_MESSAGE","senderId":"id","senderName":"name","message":"text"}` |
 | `GAME_STARTED` | Notification that a game has started | `{"command":"GAME_STARTED","roomId":"roomId","hostId":"hostId","spawnPositions":{"playerId1":{"x":66,"y":-2,"z":0.8},"playerId2":{"x":60,"y":-2,"z":0.8}}}` |
-| `AUTH_FAILED` | Authentication failure notification | `{"command":"AUTH_FAILED","message":"Invalid password for this player name."}` |
 
 #### Error Handling
 - Malformed JSON commands return `{"command":"ERROR","message":"Invalid JSON format"}`.
 - Unrecognized commands return `{"command":"UNKNOWN_COMMAND","originalCommand":"cmd"}`.
-- Authentication errors return `{"command":"ERROR","message":"Authentication required. Please use NAME command with password."}` or `{"command":"AUTH_FAILED","message":"Invalid password."}`.
+- Unauthenticated command: `{"command":"ERROR","message":"Authentication required. Use REGISTER, LOGIN, or AUTO_AUTH first."}`
+- Auth failures: `{"command":"REGISTER_FAILED"|"LOGIN_FAILED"|"AUTO_AUTH_FAILED","message":"..."}`.
 - If server detects inactivity (>60 s without messages), it will close the TCP socket.
 - Common error messages include:
   - `"Room not found."`

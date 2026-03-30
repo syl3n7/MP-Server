@@ -17,6 +17,7 @@ namespace MP.Server.Data
         public DbSet<UserSession> UserSessions { get; set; } = null!;
         public DbSet<PasswordResetRequest> PasswordResetRequests { get; set; } = null!;
         public DbSet<LoginAuditLog> LoginAuditLogs { get; set; } = null!;
+        public DbSet<UserAuthToken> UserAuthTokens { get; set; } = null!;
         
         // Server logging tables
         public DbSet<ServerLog> ServerLogs { get; set; } = null!;
@@ -90,7 +91,23 @@ namespace MP.Server.Data
                 entity.Property(e => e.Timestamp)
                     .HasDefaultValueSql("CURRENT_TIMESTAMP(6)");
             });
-            
+
+            // UserAuthToken configuration
+            modelBuilder.Entity<UserAuthToken>(entity =>
+            {
+                entity.HasOne(e => e.User)
+                    .WithMany()
+                    .HasForeignKey(e => e.UserId)
+                    .OnDelete(DeleteBehavior.Cascade);
+
+                entity.HasIndex(e => e.TokenHash).IsUnique();
+                entity.HasIndex(e => e.UserId);
+                entity.HasIndex(e => e.ExpiresAt);
+
+                entity.Property(e => e.CreatedAt)
+                    .HasDefaultValueSql("CURRENT_TIMESTAMP(6)");
+            });
+
             // ServerLog configuration
             modelBuilder.Entity<ServerLog>(entity =>
             {
