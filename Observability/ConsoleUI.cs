@@ -211,91 +211,22 @@ public class ConsoleUI
     private async Task TestWanConnectivity()
     {
         Console.WriteLine("🧪 Testing WAN connectivity...");
-        
         var logger = Microsoft.Extensions.Logging.LoggerFactory.Create(b => b.AddConsole()).CreateLogger<ConnectionTester>();
         var tester = new ConnectionTester(logger);
-        
-        var result = await tester.TestWanConnectivity();
-        var testIps = new[] { "8.8.8.8", "1.1.1.1", "9.9.9.9" };
-
-        Console.WriteLine("🌍 Checking internet reachability...");
-        var pingTasks = testIps.Select(async ip =>
-        {
-            try
-            {
-                using var ping = new System.Net.NetworkInformation.Ping();
-                var reply = await ping.SendPingAsync(ip, 1500);
-                var success = reply.Status == System.Net.NetworkInformation.IPStatus.Success;
-
-                Console.WriteLine(success
-                    ? $"  {ip}: ✅ {reply.RoundtripTime}ms"
-                    : $"  {ip}: ❌ {reply.Status}");
-
-                return (Success: success, RoundtripTime: success ? reply.RoundtripTime : -1L);
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"  {ip}: ❌ {ex.Message}");
-                return (Success: false, RoundtripTime: -1L);
-            }
-        }).ToArray();
-
-        var pingResults = await Task.WhenAll(pingTasks);
-        var successfulPings = pingResults.Where(x => x.Success).ToArray();
-        var isOnline = successfulPings.Length > 0;
-
-        if (isOnline)
-        {
-            var avgLatency = successfulPings.Average(x => x.RoundtripTime);
-            var minLatency = successfulPings.Min(x => x.RoundtripTime);
-            var maxLatency = successfulPings.Max(x => x.RoundtripTime);
-            Console.WriteLine($"🌍 Internet check: ONLINE ({successfulPings.Length}/{testIps.Length} hosts reachable)");
-            Console.WriteLine($"   Latency — avg: {avgLatency:F0}ms, min: {minLatency}ms, max: {maxLatency}ms");
-        }
-        else
-        {
-            Console.WriteLine($"🌍 Internet check: OFFLINE (0/{testIps.Length} hosts reachable)");
-        }
-
-        // Keep WAN test strict: requires both WAN test and internet reachability
-        result = result && isOnline;
-        
-        if (result)
-        {
-            Console.WriteLine("✅ WAN connectivity test PASSED");
-        }
-        else
-        {
-            Console.WriteLine("❌ WAN connectivity test FAILED");
-            Console.WriteLine("Possible issues:");
-            if (!isOnline)
-            {
-                Console.WriteLine("  • No internet connection detected — all ping targets unreachable");
-            }
-            Console.WriteLine("  • NAT port forwarding not configured correctly");
-            Console.WriteLine("  • Firewall blocking port 443");
-            Console.WriteLine("  • ISP blocking port 443");
-            Console.WriteLine("  • Server not bound to correct interface");
-        }
+        bool result = await tester.TestWanConnectivity();
+        Console.WriteLine(result ? "✅ WAN connectivity test PASSED" : "❌ WAN connectivity test FAILED — check internet/firewall");
     }
     
     private async Task TestLanConnectivity()
     {
         Console.WriteLine("🧪 Testing LAN connectivity...");
-        
         var logger = Microsoft.Extensions.Logging.LoggerFactory.Create(b => b.AddConsole()).CreateLogger<ConnectionTester>();
         var tester = new ConnectionTester(logger);
-        
-        var result = await tester.TestLanConnectivity();
-        
-        if (result)
-        {
-            Console.WriteLine("✅ LAN connectivity test PASSED");
-        }
-        else
-        {
-            Console.WriteLine("❌ LAN connectivity test FAILED - Check local firewall");
-        }
+        var gateway = ConnectionTester.GetDefaultGateway();
+        if (gateway != null)
+            Console.WriteLine($"  Gateway detected: {gateway}");
+        bool result = await tester.TestLanConnectivity();
+        Console.WriteLine(result ? "✅ LAN connectivity test PASSED" : "❌ LAN connectivity test FAILED — gateway unreachable or not found");
     }
     
     private void ShowNetworkInfo()
