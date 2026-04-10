@@ -19,6 +19,7 @@ public sealed class PlayerSession : IDisposable
     private readonly Socket _socket;
     private readonly RacingServer _server;
     private readonly AuthService? _authService;
+    private readonly string _udpSharedSecret;
     private readonly Stream _stream;
     private readonly PipeReader _reader;
     private readonly PipeWriter _writer;
@@ -35,11 +36,12 @@ public sealed class PlayerSession : IDisposable
     // UDP Encryption
     public UdpEncryption? UdpCrypto { get; private set; }
     
-    public PlayerSession(Socket socket, RacingServer server, AuthService? authService = null, bool useTls = false, X509Certificate2? certificate = null)
+    public PlayerSession(Socket socket, RacingServer server, AuthService? authService = null, bool useTls = false, X509Certificate2? certificate = null, string udpSharedSecret = "change-me-in-appsettings")
     {
         _socket = socket;
         _server = server;
         _authService = authService;
+        _udpSharedSecret = udpSharedSecret;
         _useTls = useTls;
         
         // Create network stream
@@ -119,9 +121,8 @@ public sealed class PlayerSession : IDisposable
     {
         try
         {
-            // Send welcome message
-            var welcomeMessage = $"CONNECTED|{Id}\n";
-            await SendTextAsync(welcomeMessage, ct);
+            // Send welcome message as JSON so clients can parse it the same way as every other message
+            await SendJsonAsync(new { command = "CONNECTED", sessionId = Id }, ct);
             
             _server.Logger.LogInformation("👋 Welcome message sent to session {SessionId}", Id);
             
@@ -210,7 +211,7 @@ public sealed class PlayerSession : IDisposable
                             AuthenticatedUsername = result.Username;
                             PlayerName            = result.Username ?? "Anonymous";
                             IsAuthenticated       = true;
-                            UdpCrypto             = new UdpEncryption(Id);
+                            UdpCrypto             = new UdpEncryption(Id, _udpSharedSecret);
                             _server.Logger.LogInformation("✅ REGISTER → {Username} (Id={UserId}) session={SessionId}", result.Username, result.UserId, Id);
                             await SendJsonAsync(new { command = "REGISTER_OK", userId = result.UserId, username = result.Username, token = result.Token }, ct);
                         }
@@ -240,7 +241,7 @@ public sealed class PlayerSession : IDisposable
                             AuthenticatedUsername = result.Username;
                             PlayerName            = result.Username ?? "Anonymous";
                             IsAuthenticated       = true;
-                            UdpCrypto             = new UdpEncryption(Id);
+                            UdpCrypto             = new UdpEncryption(Id, _udpSharedSecret);
                             _server.Logger.LogInformation("🔐 LOGIN → {Username} (Id={UserId}) session={SessionId}", result.Username, result.UserId, Id);
                             await SendJsonAsync(new { command = "LOGIN_OK", userId = result.UserId, username = result.Username, token = result.Token }, ct);
                         }
@@ -269,7 +270,7 @@ public sealed class PlayerSession : IDisposable
                             AuthenticatedUsername = result.Username;
                             PlayerName            = result.Username ?? "Anonymous";
                             IsAuthenticated       = true;
-                            UdpCrypto             = new UdpEncryption(Id);
+                            UdpCrypto             = new UdpEncryption(Id, _udpSharedSecret);
                             _server.Logger.LogInformation("🔑 AUTO_AUTH → {Username} (Id={UserId}) session={SessionId}", result.Username, result.UserId, Id);
                             await SendJsonAsync(new { command = "AUTO_AUTH_OK", userId = result.UserId, username = result.Username }, ct);
                         }
@@ -459,15 +460,13 @@ public sealed class PlayerSession : IDisposable
                     gameRoom.StartGame();
                     _server.Logger.LogInformation("🎮 Game started in room {RoomId} by host {HostId}", CurrentRoomId, Id);
                     
-                    // Collect spawn positions for all players
+                    // Collect spawn slot indices for all players.
+                    // The game client resolves the actual world position from its own scene.
                     var playerSpawnPositions = new Dictionary<string, object>();
                     foreach (var player in gameRoom.Players)
                     {
-                        var spawnPos = gameRoom.GetPlayerSpawnPosition(player.Id);
                         playerSpawnPositions[player.Id] = new { 
-                            x = spawnPos.X, 
-                            y = spawnPos.Y, 
-                            z = spawnPos.Z 
+                            spawnIndex = gameRoom.GetPlayerSpawnIndex(player.Id)
                         };
                     }
                     

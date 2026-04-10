@@ -6,6 +6,25 @@ This guide consolidates the authentication refactor with your research requireme
 
 ---
 
+## Progress Tracker
+
+### Generalisation & Godot Compatibility
+- ✅ Removed hardcoded racing spawn positions from `GameRoom` → replaced with generic 0-based `spawnIndex` (client resolves world position)
+- ✅ Removed hardcoded public IP (`89.114.116.19`) → configurable via `appsettings.json` `ServerSettings:PublicIP` or `SERVER_PUBLIC_IP` env var
+- ✅ Welcome message: `CONNECTED|{id}` → `{"command":"CONNECTED","sessionId":"..."}` (plain JSON, Godot-friendly)
+- ✅ UDP shared secret: `"RacingServerUDP2024!"` hardcoded in `UdpEncryption.cs` → configurable via `appsettings.json` `SecurityConfig:UdpSharedSecret`
+- 🔜 Generic room defaults: `"Race Room"` → `"Room"` in `GameRoom.cs` and `PlayerSession.cs`
+- 🔜 Envelope-based protocol for gameplay actions (`messageId`, `timestampMs`, `sessionId` fields)
+- 🔜 Layer file moves: `PlayerSession`, `RacingServer` → `Transport/`; `GameRoom` → `Domain/`
+
+### Authentication (completed prior to April 2026)
+- ✅ DB-backed `AuthService` with BCrypt + persistent 30-day tokens
+- ✅ `REGISTER`, `LOGIN`, `AUTO_AUTH` commands replace old `NAME+password` flow
+- ✅ Account lockout (3 failed attempts → 30-min lock)
+- ✅ All gameplay commands gated behind `IsAuthenticated`
+
+---
+
 ## 1. Authoritative Server & State Integrity
 - The server is the single source of truth for all world, player, and inventory state.
 - All gameplay actions (move, inventory, kill, etc.) are validated and processed server-side.

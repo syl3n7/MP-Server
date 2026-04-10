@@ -46,6 +46,10 @@ public sealed class RacingServer : IHostedService, IDisposable
     private readonly bool _useTls;
     private readonly X509Certificate2? _serverCertificate;
     
+    // Public IP shown in logs and baked into the self-signed certificate SANs.
+    // Set via SERVER_PUBLIC_IP env var or appsettings ServerSettings:PublicIP.
+    private readonly string _publicIp;
+
     // Threading
     private Task? _tcpAcceptTask;
     private Task? _udpReceiveTask;
@@ -58,13 +62,16 @@ public sealed class RacingServer : IHostedService, IDisposable
     public SecurityManager SecurityManager => _securityManager;
     public DatabaseLoggingService? DatabaseLoggingService => _dbLoggingService;
     
-    public RacingServer(int tcpPort, int udpPort, ILogger<RacingServer>? logger = null, bool useTls = true, X509Certificate2? certificate = null, SecurityConfig? securityConfig = null, DatabaseLoggingService? dbLoggingService = null, AuthService? authService = null)
+    public RacingServer(int tcpPort, int udpPort, ILogger<RacingServer>? logger = null, bool useTls = true, X509Certificate2? certificate = null, SecurityConfig? securityConfig = null, DatabaseLoggingService? dbLoggingService = null, AuthService? authService = null, string? publicIp = null)
     {
         _authService = authService;
         _tcpPort = tcpPort;
         _udpPort = udpPort;
         _logger = logger ?? LoggerFactory.Create(b => b.AddConsole()).CreateLogger<RacingServer>();
         _useTls = useTls;
+        _publicIp = publicIp
+            ?? Environment.GetEnvironmentVariable("SERVER_PUBLIC_IP")
+            ?? "0.0.0.0";
         _serverCertificate = certificate ?? GenerateOrLoadCertificate();
         _dbLoggingService = dbLoggingService;
         
@@ -125,7 +132,7 @@ public sealed class RacingServer : IHostedService, IDisposable
         
         _logger.LogInformation("✅ Server started on TCP:{TcpPort} UDP:{UdpPort}", _tcpPort, _udpPort);
         _logger.LogInformation("🔗 Server binding: 0.0.0.0:{Port} ({Security})", _tcpPort, _useTls ? "TLS/SSL" : "Plain");
-        _logger.LogInformation("📡 Clients should connect to: {PublicIP}:{Port}", "89.114.116.19", _tcpPort);
+        _logger.LogInformation("📡 Clients should connect to: {PublicIP}:{Port}", _publicIp, _tcpPort);
         
         // Log server start to database
         _ = Task.Run(async () =>
@@ -226,7 +233,7 @@ public sealed class RacingServer : IHostedService, IDisposable
         var endpoint = socket.RemoteEndPoint as IPEndPoint;
         
         using (socket)
-        using (var session = new PlayerSession(socket, this, _authService, _useTls, _serverCertificate))
+        using (var session = new PlayerSession(socket, this, _authService, _useTls, _serverCertificate, _securityConfig.UdpSharedSecret))
         {
             try
             {
@@ -816,8 +823,8 @@ public sealed class RacingServer : IHostedService, IDisposable
             // Generate new self-signed certificate
             _logger.LogInformation("🔐 Generating new self-signed certificate...");
             
-            // Use environment variables to define the public IP or hostname
-            string publicIp = Environment.GetEnvironmentVariable("SERVER_PUBLIC_IP") ?? "89.114.116.19";
+            // Use the resolved public IP and optional hostname override
+            string publicIp = _publicIp;
             string hostname = Environment.GetEnvironmentVariable("SERVER_HOSTNAME") ?? "racing-server";
             
             var cert = GenerateSelfSignedCertificate(hostname, publicIp, certPassword);

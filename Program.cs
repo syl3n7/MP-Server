@@ -71,12 +71,25 @@ try
     const int udpPort = 443;
     const bool useTls = true;
     
-    Console.WriteLine($"🚀 Starting Racing Server...");
+    // Read public IP from config (ServerSettings:PublicIP) with env-var fallback
+    var config = host.Services.GetRequiredService<Microsoft.Extensions.Configuration.IConfiguration>();
+    var publicIp = config["ServerSettings:PublicIP"]
+        ?? Environment.GetEnvironmentVariable("SERVER_PUBLIC_IP")
+        ?? "0.0.0.0";
+    
+    Console.WriteLine($"\ud83d\ude80 Starting Racing Server...");
     Console.WriteLine($"   TCP Port: {tcpPort}");
     Console.WriteLine($"   UDP Port: {udpPort}");
     Console.WriteLine($"   TLS: {(useTls ? "Enabled" : "Disabled")}");
+    Console.WriteLine($"   Public IP: {publicIp}");
     
-    var server = new RacingServer(tcpPort, udpPort, logger, useTls, null, null, dbLoggingService, authService);
+    // Build SecurityConfig, pulling the UDP secret from appsettings.json
+    var securityConfig = new MP.Server.Security.SecurityConfig
+    {
+        UdpSharedSecret = config["SecurityConfig:UdpSharedSecret"] ?? "change-me-before-deploying"
+    };
+    
+    var server = new RacingServer(tcpPort, udpPort, logger, useTls, null, securityConfig, dbLoggingService, authService, publicIp);
     
     // Start server
     await server.StartAsync(serverCts.Token);

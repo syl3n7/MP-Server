@@ -2,7 +2,6 @@ using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
-using System.Numerics;
 using MP.Server;
 using MP.Server.Services;
 using Microsoft.Extensions.Logging;
@@ -19,33 +18,10 @@ public sealed class GameRoom
     private readonly DatabaseLoggingService? _loggingService;
     private readonly ILogger? _logger;
     
-    // Predefined spawn positions on the track
-    private readonly Vector3[] _trackGaragePositions = new Vector3[]
-    {
-        new Vector3(66, -2, 0.8f),   // Position 0
-        new Vector3(60, -2, 0.8f),   // Position 1
-        new Vector3(54, -2, 0.8f),   // Position 2
-        new Vector3(47, -2, 0.8f),   // Position 3
-        new Vector3(41, -2, 0.8f),   // Position 4
-        new Vector3(35, -2, 0.8f),   // Position 5
-        new Vector3(28, -2, 0.8f),   // Position 6
-        new Vector3(22, -2, 0.8f),   // Position 7
-        new Vector3(16, -2, 0.8f),   // Position 8
-        new Vector3(9, -2, 0.8f),    // Position 9
-        new Vector3(3, -2, 0.8f),    // Position 10
-        new Vector3(-3, -2, 0.8f),   // Position 11
-        new Vector3(-9, -2, 0.8f),   // Position 12
-        new Vector3(-15, -2, 0.8f),  // Position 13
-        new Vector3(-22, -2, 0.8f),  // Position 14
-        new Vector3(-28, -2, 0.8f),  // Position 15
-        new Vector3(-34, -2, 0.8f),  // Position 16
-        new Vector3(-41, -2, 0.8f),  // Position 17
-        new Vector3(-47, -2, 0.8f),  // Position 18
-        new Vector3(-54, -2, 0.8f)   // Position 19
-    };
-    
+    // Sequential spawn slot indices assigned as players join (0-based).
+    // The game client resolves the actual world position from its own scene.
     private readonly ConcurrentDictionary<string, PlayerInfo> _players = new();
-    private readonly ConcurrentDictionary<string, int> _playerPositions = new();
+    private readonly ConcurrentDictionary<string, int> _playerSpawnSlots = new();
     
     public GameRoom(DatabaseLoggingService? loggingService = null, ILogger? logger = null)
     {
@@ -72,21 +48,18 @@ public sealed class GameRoom
         // First try to add the player to prevent race conditions
         if (_players.TryAdd(player.Id, player))
         {
-            // Player was successfully added, now assign spawn position
-            // Use _players.Count - 1 because the player is now in the collection
-            int positionIndex = _players.Count - 1;
-            if (positionIndex >= 0 && positionIndex < _trackGaragePositions.Length)
-            {
-                _playerPositions.TryAdd(player.Id, positionIndex);
-            }
+            // Assign a sequential spawn slot index (0-based).
+            // Use Count - 1 because the player is already in the collection.
+            int spawnSlot = _players.Count - 1;
+            _playerSpawnSlots.TryAdd(player.Id, spawnSlot);
             
-            _logger?.LogInformation("Player {PlayerId} ({PlayerName}) joined room {RoomId} at position {Position}", 
-                player.Id, player.PlayerName, Id, positionIndex);
+            _logger?.LogInformation("Player {PlayerId} ({PlayerName}) joined room {RoomId} at spawn slot {SpawnSlot}", 
+                player.Id, player.PlayerName, Id, spawnSlot);
             
             // Log room activity
             _loggingService?.LogRoomActivityAsync(
                 Id, Name, "PlayerJoined", player.Id, player.PlayerName, _players.Count,
-                $"Player joined at spawn position {positionIndex}");
+                $"Player joined at spawn slot {spawnSlot}");
             
             return true;
         }
@@ -98,7 +71,7 @@ public sealed class GameRoom
     {
         var player = _players.TryGetValue(playerId, out var playerInfo) ? playerInfo : null;
         
-        _playerPositions.TryRemove(playerId, out _);
+        _playerSpawnSlots.TryRemove(playerId, out _);
         var removed = _players.TryRemove(playerId, out _);
         
         if (removed && player != null)
@@ -115,16 +88,13 @@ public sealed class GameRoom
         return removed;
     }
     
-    public Vector3 GetPlayerSpawnPosition(string playerId)
+    /// <summary>
+    /// Returns the 0-based spawn slot index for a player.
+    /// The game client maps this index to the appropriate spawn point in its own scene.
+    /// </summary>
+    public int GetPlayerSpawnIndex(string playerId)
     {
-        if (_playerPositions.TryGetValue(playerId, out int positionIndex) && 
-            positionIndex >= 0 && positionIndex < _trackGaragePositions.Length)
-        {
-            return _trackGaragePositions[positionIndex];
-        }
-        
-        // Default position if no specific position is assigned
-        return _trackGaragePositions[0];
+        return _playerSpawnSlots.TryGetValue(playerId, out int slot) ? slot : 0;
     }
     
     public bool ContainsPlayer(string playerId)

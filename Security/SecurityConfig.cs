@@ -28,6 +28,12 @@ namespace MP.Server.Security
         /// Security logging configuration
         /// </summary>
         public SecurityLoggingConfig Logging { get; set; } = new();
+
+        /// <summary>
+        /// Shared secret used to derive per-session AES keys for UDP encryption.
+        /// Must match the value configured in the game client.
+        /// </summary>
+        public string UdpSharedSecret { get; set; } = "change-me-in-appsettings";
     }
     
     public class PacketValidationConfig

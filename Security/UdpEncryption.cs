@@ -14,7 +14,7 @@ namespace MP.Server.Security
         private readonly byte[] _key;
         private readonly byte[] _iv;
         
-        public UdpEncryption(string sessionId, string sharedSecret = "RacingServerUDP2024!")
+        public UdpEncryption(string sessionId, string sharedSecret)
         {
             // Generate deterministic key and IV from session ID and shared secret
             using var sha256 = SHA256.Create();
