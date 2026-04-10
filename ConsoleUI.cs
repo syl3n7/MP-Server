@@ -20,7 +20,7 @@ public class ConsoleUI
 
     public async Task RunAsync(CancellationToken ct)
     {
-        Console.WriteLine("Racing Server Console");
+        Console.WriteLine("Server Console");
         Console.WriteLine("=====================");
         PrintHelp();
 
