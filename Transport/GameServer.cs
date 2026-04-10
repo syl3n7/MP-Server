@@ -512,6 +512,34 @@ public sealed class GameServer : IHostedService, IDisposable
             string? rootSessionId = sessionIdRootEl.ValueKind != JsonValueKind.Undefined
                 ? sessionIdRootEl.GetString() : null;
 
+            // 🛡️ SECURITY: The payload's sessionId must match the session whose key
+            // successfully decrypted this packet. A mismatch means a client is claiming
+            // to be a different player — reject immediately.
+            if (rootSessionId != null && senderSession != null && rootSessionId != senderSession.Id)
+            {
+                _logger.LogWarning(
+                    "🚫 UDP sessionId spoofing attempt: packet decrypted by session {ActualId} but claims to be session {ClaimedId} — rejected",
+                    senderSession.Id, rootSessionId);
+                _ = Task.Run(async () =>
+                {
+                    try
+                    {
+                        if (_dbLoggingService != null)
+                        {
+                            await _dbLoggingService.LogSecurityEventAsync(
+                                "UDP_SESSION_SPOOF",
+                                remoteEndPoint.ToString() ?? "unknown",
+                                3,
+                                $"Session {senderSession.Id} sent a packet claiming sessionId={rootSessionId}",
+                                senderSession.Id
+                            );
+                        }
+                    }
+                    catch { /* ignore logging errors */ }
+                });
+                return;
+            }
+
             if (udpAction == "move" && rootSessionId != null)
             {
                 string? sessionId = rootSessionId;
