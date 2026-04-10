@@ -21,6 +21,13 @@ namespace MP.Server.Security
         private readonly DatabaseLoggingService? _loggingService;
         private readonly ConcurrentDictionary<string, PlayerSecurityInfo> _playerSecurity = new();
         private readonly ConcurrentQueue<SecurityEvent> _securityEvents = new();
+
+        /// <summary>
+        /// Set by the transport layer (GameServer) after construction so SecurityManager
+        /// can trigger a real kick without holding a reference to the server.
+        /// Receives the session/client ID to kick.
+        /// </summary>
+        public Action<string>? KickCallback { get; set; }
         
         public SecurityManager(SecurityConfig config, ILogger? logger = null, DatabaseLoggingService? loggingService = null)
         {
@@ -188,8 +195,14 @@ namespace MP.Server.Security
                     $"Auto-kicked for {recentViolations} violations in {_config.AntiCheat.ViolationWindowMinutes} minutes", 
                     severity: 4);
                 
-                // TODO: Implement actual kick mechanism (would need server reference)
-                _logger?.LogWarning("Player {ClientId} should be kicked for excessive violations", clientId);
+                if (KickCallback != null)
+                {
+                    KickCallback(clientId);
+                }
+                else
+                {
+                    _logger?.LogWarning("Player {ClientId} should be kicked but no KickCallback is registered", clientId);
+                }
             }
         }
         

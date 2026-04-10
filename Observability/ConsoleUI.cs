@@ -8,6 +8,8 @@ using MP.Server.Testing;
 using MP.Server.Diagnostics;
 using MP.Server.Transport;
 
+namespace MP.Server.Observability;
+
 public class ConsoleUI
 {
     private readonly GameServer _server;
@@ -318,14 +320,14 @@ public class ConsoleUI
         Console.WriteLine($".NET Version: {Environment.Version}");
     }
 
-    private Task HandleKickPlayer()
+    private async Task HandleKickPlayer()
     {
-        var sessions = _server.GetAllSessions().ToList(); // Convert to List for indexing
+        var sessions = _server.GetAllSessions().ToList();
         
         if (sessions.Count == 0)
         {
             Console.WriteLine("No active sessions to kick.");
-            return Task.CompletedTask;
+            return;
         }
         
         Console.WriteLine("Active Sessions:");
@@ -336,27 +338,25 @@ public class ConsoleUI
         }
         
         Console.Write("Enter session number to kick (or 'cancel'): ");
-        var input = Console.ReadLine()?.Trim();
+        var input = await Task.Run(() => Console.ReadLine());
+        input = input?.Trim();
         
         if (string.IsNullOrEmpty(input) || input.ToLower() == "cancel")
         {
             Console.WriteLine("Kick cancelled.");
-            return Task.CompletedTask;
+            return;
         }
         
         if (int.TryParse(input, out int sessionIndex) && sessionIndex > 0 && sessionIndex <= sessions.Count)
         {
             var sessionToKick = sessions[sessionIndex - 1];
             Console.WriteLine($"Kicking player: {sessionToKick.PlayerName}");
-            
-            // Note: This would need to be implemented in GameServer
-            // _server.KickPlayer(sessionToKick.Id);
-            Console.WriteLine("Note: Kick functionality needs to be implemented in GameServer class.");
+            _server.SecurityManager.KickCallback?.Invoke(sessionToKick.Id);
+            Console.WriteLine($"Kicked {sessionToKick.PlayerName}.");
         }
         else
         {
             Console.WriteLine("Invalid selection.");
         }
-        return Task.CompletedTask;
     }
 }

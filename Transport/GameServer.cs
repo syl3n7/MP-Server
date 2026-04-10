@@ -88,7 +88,20 @@ public sealed class GameServer : IHostedService, IDisposable
         // Initialize security system
         _securityConfig = securityConfig ?? new SecurityConfig();
         _securityManager = new SecurityManager(_securityConfig, _logger, _dbLoggingService);
-        
+        _securityManager.KickCallback = clientId =>
+        {
+            if (_sessions.TryGetValue(clientId, out var sessionToKick))
+            {
+                _logger.LogWarning("🦵 Auto-kicking session {SessionId} ({Name}) for excessive security violations",
+                    sessionToKick.Id, sessionToKick.PlayerName);
+                _ = Task.Run(async () =>
+                {
+                    try { await sessionToKick.DisconnectAsync().ConfigureAwait(false); }
+                    catch { /* ignore disconnect errors */ }
+                });
+            }
+        };
+
         if (_useTls && _serverCertificate == null)
         {
             _logger.LogWarning("⚠️ TLS enabled but no certificate available. Falling back to plain text.");
