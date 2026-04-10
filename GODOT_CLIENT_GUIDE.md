@@ -120,7 +120,7 @@ Because Godot's TLS peer is non-blocking, read byte-by-byte until you find `\n`:
 ```gdscript
 var _tcp_buffer: PackedByteArray = PackedByteArray()
 
-func _poll_tcp() -> void:
+func _poll_tls() -> void:
     _tls.poll()
     while _tls.get_available_bytes() > 0:
         var byte_arr = _tls.get_data(1)
@@ -135,7 +135,7 @@ func _poll_tcp() -> void:
             _tcp_buffer.append(b)
 ```
 
-Call `_poll_tcp()` from `_process(_delta)`.
+Call `_poll_tls()` from `_process(_delta)`.
 
 ### Welcome message
 
@@ -160,8 +160,12 @@ func _on_tcp_message(raw: String) -> void:
             _on_login_ok(msg)
         "AUTO_AUTH_OK":
             _on_auto_auth_ok(msg)
-        "REGISTER_FAILED", "LOGIN_FAILED", "AUTO_AUTH_FAILED":
+        "AUTO_AUTH_FAILED":
             push_error("Auth failed: " + msg.get("message", ""))
+        "REGISTER_FAILED":
+            push_error("Registration failed: " + msg.get("message", ""))
+        "LOGIN_FAILED":
+            push_error("Login failed: " + msg.get("message", ""))
         "ROOM_CREATED":
             _current_room_id = msg["roomId"]
         "JOIN_OK":
@@ -171,9 +175,14 @@ func _on_tcp_message(raw: String) -> void:
         "ROOM_PLAYERS":
             emit_signal("room_players_received", msg["players"])
         "GAME_STARTED":
-            _on_game_started(msg)
-        "PLAYER_DISCONNECTED":
-            emit_signal("player_disconnected", msg.get("sessionId", ""))
+            # spawnPositions dict: key = sessionId, value = {"spawnIndex": N}
+            emit_signal("game_started", msg.get("spawnPositions", {}))
+        "PLAYER_JOINED":                            # Phase 3 — not yet sent by server
+            emit_signal("player_joined", msg.get("playerId", ""), msg.get("playerName", ""))
+        "PLAYER_LEFT":                              # Phase 3 — not yet sent by server
+            emit_signal("player_left", msg.get("playerId", ""))
+        "GAME_ENDED":                               # Phase 3 — not yet sent by server
+            emit_signal("game_ended")
         "PONG":
             pass  # heartbeat reply
         "HEARTBEAT_ACK":
@@ -295,16 +304,16 @@ func _clear_token() -> void:
 ### 4.5 Recommended Connect Sequence
 
 ```gdscript
+# Connect signals before calling connect_to_server():
 func _start() -> void:
-    if not await _connect_tcp(SERVER_HOST, TCP_PORT):
+    connected.connect(try_auto_auth)
+    auto_auth_failed.connect(_show_login_ui)   # your UI function
+    authenticated.connect(_enter_lobby)        # your lobby function
+    if not await connect_to_server():
         return
-    # _on_tcp_message will receive "CONNECTED" → _session_id set
-    # Then:
-
-func _on_connected() -> void:
-    await try_auto_auth()
-    # If AUTO_AUTH_FAILED signal fires → show login/register UI
-    # If "authenticated" signal fires  → proceed to lobby
+    # connect_to_server() returns once TLS handshake is done.
+    # The CONNECTED welcome arrives asynchronously via _poll_tls() → emits "connected" signal
+    # → try_auto_auth() is called automatically.
 ```
 
 ---
@@ -330,6 +339,8 @@ _send({"command": "CREATE_ROOM", "name": "My Room", "maxPlayers": 4})
 ```gdscript
 _send({"command": "JOIN_ROOM", "roomId": target_room_id})
 # Response: {"command":"JOIN_OK","roomId":"..."}
+# ⚠️ Phase 3: response will also include "players":[{"id":"...","name":"..."}] and "spawnIndex":0
+# ⚠️ Phase 3: other room members will receive {"command":"PLAYER_JOINED","playerId":"...","playerName":"..."}
 ```
 
 ### Get players in current room
@@ -341,22 +352,25 @@ _send({"command": "GET_ROOM_PLAYERS"})
 ### Start game (host only)
 ```gdscript
 _send({"command": "START_GAME"})
-# Broadcast to all room members: {"command":"GAME_STARTED","roomId":"...","hostId":"...","spawnPositions":{"<sessionId>":{"spawnIndex":0},...}}
-# The host also receives it directly
+# Broadcast to all room members (including host): {"command":"GAME_STARTED","roomId":"...","hostId":"...","spawnPositions":{"<sessionId>":{"spawnIndex":0},...}}
+# ⚠️ The host receives GAME_STARTED twice (once via broadcast, once as direct reply).
+#    Guard against this in your game_started handler — check if the game has already started.
 ```
-`spawnPositions` is a dictionary keyed by `sessionId`. Look up your own `sessionId` to find your spawn index.
+`spawnPositions` is a dictionary keyed by `sessionId`. Look up your own `sessionId` to find your `spawnIndex`.
 
 ### Leave room
 ```gdscript
 _send({"command": "LEAVE_ROOM"})
 # Response: {"command":"LEAVE_OK","roomId":"..."}
 # If you were host and others remain, host is transferred to the next player
+# ⚠️ Phase 3: other room members will receive {"command":"PLAYER_LEFT","playerId":"..."}
 ```
 
 ### Chat message (in-room)
 ```gdscript
 _send({"command": "MESSAGE", "message": "Hello!"})
-# Broadcast to room: {"command":"CHAT_MESSAGE","senderName":"...","message":"..."} (not yet confirmed — see NOTE below)
+# Response to sender:          {"command":"MESSAGE_OK"}
+# Broadcast to others in room: {"command":"CHAT","roomId":"...","senderName":"...","message":"...","timestamp":"2026-04-11 12:00:00"}
 ```
 
 ### Relay message (direct, peer-to-peer via server)
@@ -577,7 +591,7 @@ const HEARTBEAT_INTERVAL := 15.0   # seconds
 var _heartbeat_timer := 0.0
 
 func _process(delta: float) -> void:
-    _poll_tcp()
+    _poll_tls()
     _poll_udp()
 
     _heartbeat_timer += delta
@@ -619,6 +633,7 @@ func _send_heartbeat() -> void:
 | `START_GAME` | Auth (host) | — | `GAME_STARTED` broadcast + `spawnPositions` | `ERROR` |
 | `MESSAGE` | Auth | `message` | `MESSAGE_OK` | `ERROR` |
 | `RELAY_MESSAGE` | Auth | `targetId`, `message` | `RELAY_OK` + `targetId` | `ERROR` |
+| `END_GAME` *(Phase 3)* | Auth (host) | — | `GAME_ENDED` broadcast | `ERROR` |
 | `BYE` | ✓ | — | `BYE_OK` (then disconnects) | — |
 
 ### TCP Envelope Actions (Client → Server, requires Auth)
@@ -657,8 +672,14 @@ signal auto_auth_failed
 signal room_list_received(rooms: Array)
 signal room_players_received(players: Array)
 signal game_started(spawn_positions: Dictionary)
+signal connected
 signal remote_position_updated(session_id: String, position: Vector3, rotation: Quaternion)
-signal player_disconnected(session_id: String)
+signal chat_received(sender_name: String, message: String)
+signal relay_received(sender_id: String, sender_name: String, message: String)
+# Phase 3 signals — wire these up now so the handlers are ready when the server sends them
+signal player_joined(player_id: String, player_name: String)
+signal player_left(player_id: String)
+signal game_ended
 
 # ── Configuration ───────────────────────────────────────────────────────────
 const SERVER_HOST     := "127.0.0.1"
@@ -743,6 +764,7 @@ func _on_message(raw: String) -> void:
     match msg.get("command", ""):
         "CONNECTED":
             _session_id = msg["sessionId"]
+            emit_signal("connected")
         "REGISTER_OK":
             _is_authenticated = true
             _username = msg["username"]
@@ -760,8 +782,13 @@ func _on_message(raw: String) -> void:
             _username = msg["username"]
             _init_udp_crypto()
             emit_signal("authenticated")
-        "AUTO_AUTH_FAILED", "REGISTER_FAILED", "LOGIN_FAILED":
+        "AUTO_AUTH_FAILED":
+            _clear_token()   # token is expired or revoked — remove it
             emit_signal("auto_auth_failed")
+        "REGISTER_FAILED":
+            push_error("[MPClient] Registration failed: " + msg.get("message", ""))
+        "LOGIN_FAILED":
+            push_error("[MPClient] Login failed: " + msg.get("message", ""))
         "ROOM_CREATED", "JOIN_OK":
             _current_room_id = msg["roomId"]
         "LEAVE_OK":
@@ -772,8 +799,10 @@ func _on_message(raw: String) -> void:
             emit_signal("room_players_received", msg["players"])
         "GAME_STARTED":
             emit_signal("game_started", msg.get("spawnPositions", {}))
-        "PLAYER_DISCONNECTED":
-            emit_signal("player_disconnected", msg.get("sessionId", ""))
+        "CHAT":
+            emit_signal("chat_received", msg.get("senderName", ""), msg.get("message", ""))
+        "RELAYED_MESSAGE":
+            emit_signal("relay_received", msg.get("senderId", ""), msg.get("senderName", ""), msg.get("message", ""))
         "ERROR":
             push_error("[MPClient] Server error: " + msg.get("message", ""))
 
@@ -948,6 +977,21 @@ func disconnect_from_server() -> void:
     _session_id = ""
     _current_room_id = ""
 ```
+
+---
+
+## Planned Protocol Changes (Phase 3)
+
+These features are not yet implemented on the server. The guide and skeleton already include the **client-side handlers** so you won't need to touch this code when the server is updated.
+
+| Feature | Current behaviour | Phase 3 change |
+|---|---|---|
+| Player joins room | Joining client gets `JOIN_OK` with only `roomId` | `JOIN_OK` will include `players[]` and `spawnIndex` |
+| Player joins room | Other members get no notification | Server will broadcast `PLAYER_JOINED` |
+| Player leaves / disconnects | Other members get no notification | Server will broadcast `PLAYER_LEFT` |
+| Game end | No server-side end signal | `END_GAME` command + `GAME_ENDED` broadcast |
+| Room state | Rooms never reset after a game | Room state machine: waiting → playing → ended |
+| Empty rooms | Never removed | Garbage-collected after 1 hour idle |
 
 ---
 

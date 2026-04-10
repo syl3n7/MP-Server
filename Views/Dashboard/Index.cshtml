@@ -1,0 +1,628 @@
+@model MP.Server.Controllers.DashboardViewModel
+@{
+    ViewData["Title"] = "Dashboard";
+
+    var uptime = Model.Uptime;
+    string uptimeStr = uptime.TotalDays >= 1
+        ? $"{(int)uptime.TotalDays}d {uptime.Hours}h {uptime.Minutes}m"
+        : uptime.TotalHours >= 1
+            ? $"{uptime.Hours}h {uptime.Minutes}m {uptime.Seconds}s"
+            : $"{uptime.Minutes}m {uptime.Seconds}s";
+
+    Func<int, string> severityBadge = s => s switch
+    {
+        1 => "badge bg-info text-dark",
+        2 => "badge bg-warning text-dark",
+        3 => "badge bg-orange",
+        _ => "badge bg-danger"
+    };
+    Func<int, string> severityLabel = s => s switch
+    {
+        1 => "Low",
+        2 => "Medium",
+        3 => "High",
+        _ => "Critical"
+    };
+    Func<string?, string> logLevelClass = l => l switch
+    {
+        "Error"    or "Critical" => "text-danger",
+        "Warning"                => "text-warning",
+        "Info"                   => "text-info",
+        _                        => "text-secondary"
+    };
+}
+
+@section Styles {
+<style>
+    /* ── Base ────────────────────────────────────────────────────────────── */
+    :root {
+        --canvas:     #0d1117;
+        --surface:    #161b22;
+        --card-bg:    #1c2130;
+        --border:     #30363d;
+        --text:       #e6edf3;
+        --muted:      #8b949e;
+        --green:      #3fb950;
+        --red:        #f85149;
+        --yellow:     #d29922;
+        --blue:       #58a6ff;
+        --purple:     #a371f7;
+        --cyan:       #39c5cf;
+        --orange:     #e3814a;
+    }
+
+    body { background: var(--canvas); color: var(--text); font-family: 'Segoe UI', system-ui, sans-serif; }
+
+    /* ── Navbar ──────────────────────────────────────────────────────────── */
+    .dash-nav {
+        background: var(--surface);
+        border-bottom: 1px solid var(--border);
+        padding: .75rem 1.5rem;
+    }
+    .dash-nav .brand { font-size: 1rem; font-weight: 700; letter-spacing: .1em; color: var(--text); }
+    .dash-nav .brand span { color: var(--purple); }
+
+    /* ── Status dot ──────────────────────────────────────────────────────── */
+    .status-dot {
+        display: inline-block; width: 9px; height: 9px;
+        border-radius: 50%; background: var(--green);
+        box-shadow: 0 0 6px var(--green);
+        animation: pulse 2s ease-in-out infinite;
+    }
+    .status-dot.offline { background: var(--red); box-shadow: 0 0 6px var(--red); animation: none; }
+    @@keyframes pulse {
+        0%, 100% { opacity: 1; }
+        50%       { opacity: .4; }
+    }
+
+    /* ── Cards ───────────────────────────────────────────────────────────── */
+    .stat-card {
+        background: var(--card-bg);
+        border: 1px solid var(--border);
+        border-radius: .6rem;
+        padding: 1.2rem 1.4rem;
+        transition: border-color .2s, box-shadow .2s;
+    }
+    .stat-card:hover { border-color: var(--purple); box-shadow: 0 0 14px rgba(163,113,247,.15); }
+
+    .stat-card .stat-icon  { font-size: 1.6rem; opacity: .75; }
+    .stat-card .stat-value { font-size: 2rem; font-weight: 700; line-height: 1.1; }
+    .stat-card .stat-label { font-size: .7rem; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin-bottom: .25rem; }
+    .stat-card .stat-sub   { font-size: .75rem; color: var(--muted); margin-top: .2rem; }
+
+    /* accent colours */
+    .c-green  { color: var(--green); }
+    .c-red    { color: var(--red); }
+    .c-yellow { color: var(--yellow); }
+    .c-blue   { color: var(--blue); }
+    .c-purple { color: var(--purple); }
+    .c-cyan   { color: var(--cyan); }
+    .c-orange { color: var(--orange); }
+
+    /* ── Section cards ───────────────────────────────────────────────────── */
+    .section-card {
+        background: var(--card-bg);
+        border: 1px solid var(--border);
+        border-radius: .6rem;
+        overflow: hidden;
+    }
+    .section-card .section-header {
+        background: var(--surface);
+        border-bottom: 1px solid var(--border);
+        padding: .65rem 1.1rem;
+        font-size: .78rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: .08em;
+        color: var(--muted);
+        display: flex;
+        align-items: center;
+        gap: .5rem;
+    }
+    .section-card .section-header .cnt {
+        margin-left: auto;
+        background: var(--border);
+        border-radius: 1rem;
+        padding: .1rem .55rem;
+        font-size: .7rem;
+        color: var(--text);
+    }
+
+    /* ── Tables ──────────────────────────────────────────────────────────── */
+    .dash-table { color: var(--text); font-size: .82rem; margin: 0; }
+    .dash-table thead th {
+        background: var(--surface);
+        border-bottom: 1px solid var(--border);
+        color: var(--muted);
+        font-weight: 600;
+        font-size: .7rem;
+        text-transform: uppercase;
+        letter-spacing: .07em;
+        padding: .55rem .9rem;
+    }
+    .dash-table tbody td { padding: .55rem .9rem; border-bottom: 1px solid rgba(48,54,61,.5); vertical-align: middle; }
+    .dash-table tbody tr:last-child td { border-bottom: none; }
+    .dash-table tbody tr:hover td { background: rgba(255,255,255,.025); }
+
+    /* ── Code / monospace ────────────────────────────────────────────────── */
+    .mono { font-family: 'Cascadia Code', 'Fira Code', monospace; font-size: .8rem; }
+
+    /* ── Badges ──────────────────────────────────────────────────────────── */
+    .bg-orange  { background-color: var(--orange) !important; color: #fff; }
+    .badge-tls  { background: rgba(63,185,80,.18); color: var(--green); border: 1px solid rgba(63,185,80,.35); }
+    .badge-plain{ background: rgba(248,81,73,.18);  color: var(--red);   border: 1px solid rgba(248,81,73,.35); }
+
+    /* ── Empty state ──────────────────────────────────────────────────────── */
+    .empty-state { padding: 2.5rem 1rem; text-align: center; color: var(--muted); font-size: .85rem; }
+    .empty-state i { font-size: 2rem; display: block; margin-bottom: .5rem; opacity: .4; }
+
+    /* ── Info grid ───────────────────────────────────────────────────────── */
+    .info-row { display: flex; justify-content: space-between; padding: .45rem 0; border-bottom: 1px solid rgba(48,54,61,.5); font-size: .83rem; }
+    .info-row:last-child { border-bottom: none; }
+    .info-row .ik { color: var(--muted); }
+    .info-row .iv { font-weight: 600; }
+
+    /* ── Auto-refresh badge ──────────────────────────────────────────────── */
+    .refresh-badge { font-size: .7rem; color: var(--muted); }
+    .refresh-badge i { color: var(--green); animation: spin 3s linear infinite; }
+    @@keyframes spin { to { transform: rotate(360deg); } }
+</style>
+}
+
+<!-- ═══ NAVBAR ═══════════════════════════════════════════════════════════════ -->
+<nav class="dash-nav d-flex align-items-center gap-3">
+    <div class="brand">&#9654; MP <span>SERVER</span></div>
+    <div class="d-flex align-items-center gap-2 ms-2">
+        <span class="status-dot @(Model.IsOnline ? "" : "offline")"></span>
+        <span style="font-size:.8rem; color:var(--muted)">@(Model.IsOnline ? "Online" : "Offline")</span>
+    </div>
+    <div class="ms-auto d-flex align-items-center gap-3">
+        <span class="refresh-badge" id="last-refresh">
+            <i class="bi bi-arrow-repeat me-1"></i>Loading…
+        </span>
+        <span style="font-size:.78rem; color:var(--muted)">@DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm") UTC</span>
+    </div>
+</nav>
+
+<!-- ═══ MAIN CONTENT ══════════════════════════════════════════════════════════ -->
+<div class="container-fluid px-3 py-3" style="max-width:1600px">
+
+    <!-- ── Row 1: Stat Cards ─────────────────────────────────────────────── -->
+    <div class="row g-3 mb-3">
+        <!-- Uptime -->
+        <div class="col-6 col-sm-4 col-lg-2">
+            <div class="stat-card">
+                <div class="stat-label">Uptime</div>
+                <div class="stat-value c-green" id="stat-uptime">@uptimeStr</div>
+                <div class="stat-sub">Since @Model.StartTime.ToString("MMM d, HH:mm") UTC</div>
+            </div>
+        </div>
+        <!-- Active Players -->
+        <div class="col-6 col-sm-4 col-lg-2">
+            <div class="stat-card">
+                <div class="stat-label">Players Online</div>
+                <div class="stat-value c-blue" id="stat-sessions">@Model.ActiveSessions.Count</div>
+                <div class="stat-sub">@Model.ConnectionsLast24h connected (24 h)</div>
+            </div>
+        </div>
+        <!-- Active Rooms -->
+        <div class="col-6 col-sm-4 col-lg-2">
+            <div class="stat-card">
+                <div class="stat-label">Active Rooms</div>
+                <div class="stat-value c-purple" id="stat-rooms">@Model.ActiveRooms.Count</div>
+                <div class="stat-sub">
+                    @if (Model.BusiestRoomName != null)
+                    {
+                        <text>Busiest: @Model.BusiestRoomName (@Model.BusiestRoomCount)</text>
+                    }
+                    else
+                    {
+                        <text>No active rooms</text>
+                    }
+                </div>
+            </div>
+        </div>
+        <!-- Users -->
+        <div class="col-6 col-sm-4 col-lg-2">
+            <div class="stat-card">
+                <div class="stat-label">Registered Users</div>
+                <div class="stat-value c-cyan">@Model.TotalUsers</div>
+                <div class="stat-sub">@Model.TodayLogins logins today</div>
+            </div>
+        </div>
+        <!-- Security -->
+        <div class="col-6 col-sm-4 col-lg-2">
+            <div class="stat-card">
+                <div class="stat-label">Security Alerts</div>
+                <div class="stat-value @(Model.CriticalSecurityEvents > 0 ? "c-red" : Model.UnresolvedSecurityEvents > 0 ? "c-yellow" : "c-green")">
+                    @Model.UnresolvedSecurityEvents
+                </div>
+                <div class="stat-sub">@Model.SecurityEventsToday events today</div>
+            </div>
+        </div>
+        <!-- Error Logs -->
+        <div class="col-6 col-sm-4 col-lg-2">
+            <div class="stat-card">
+                <div class="stat-label">Error Logs (today)</div>
+                <div class="stat-value @(Model.ErrorLogsToday > 0 ? "c-red" : "c-green")">@Model.ErrorLogsToday</div>
+                <div class="stat-sub">@Model.WarningLogsToday warnings</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ── Row 2: Server Info + 24 h Stats ──────────────────────────────── -->
+    <div class="row g-3 mb-3">
+        <!-- Server Info -->
+        <div class="col-md-6">
+            <div class="section-card h-100">
+                <div class="section-header"><i class="bi bi-server"></i> Server Information</div>
+                <div class="px-3 py-2">
+                    <div class="info-row"><span class="ik">Hostname</span><span class="iv mono">@Model.Hostname</span></div>
+                    <div class="info-row"><span class="ik">Public IP</span><span class="iv mono">@Model.PublicIp</span></div>
+                    <div class="info-row">
+                        <span class="ik">TCP Port</span>
+                        <span class="iv mono">@Model.TcpPort</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="ik">UDP Port</span>
+                        <span class="iv mono">@Model.UdpPort</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="ik">Transport Security</span>
+                        <span class="iv">
+                            @if (Model.UseTls)
+                            {
+                                <span class="badge badge-tls"><i class="bi bi-lock-fill me-1"></i>TLS Enabled</span>
+                            }
+                            else
+                            {
+                                <span class="badge badge-plain"><i class="bi bi-unlock me-1"></i>Plain TCP</span>
+                            }
+                        </span>
+                    </div>
+                    <div class="info-row"><span class="ik">Started</span><span class="iv">@Model.StartTime.ToString("yyyy-MM-dd HH:mm:ss") UTC</span></div>
+                    <div class="info-row"><span class="ik">Uptime</span><span class="iv c-green" id="info-uptime">@uptimeStr</span></div>
+                </div>
+            </div>
+        </div>
+        <!-- 24 h Stats -->
+        <div class="col-md-6">
+            <div class="section-card h-100">
+                <div class="section-header"><i class="bi bi-bar-chart-line"></i> 24-Hour Statistics</div>
+                <div class="px-3 py-2">
+                    <div class="info-row"><span class="ik">Connections</span><span class="iv c-blue">@Model.ConnectionsLast24h</span></div>
+                    <div class="info-row">
+                        <span class="ik">TLS Connections</span>
+                        <span class="iv">
+                            <span class="c-green">@Model.TlsConnectionsLast24h</span>
+                            @if (Model.ConnectionsLast24h > 0)
+                            {
+                                <span class="text-secondary ms-1" style="font-size:.75rem">
+                                    (@((int)((double)Model.TlsConnectionsLast24h / Model.ConnectionsLast24h * 100))%)
+                                </span>
+                            }
+                        </span>
+                    </div>
+                    <div class="info-row"><span class="ik">Disconnections</span><span class="iv">@Model.DisconnectionsLast24h</span></div>
+                    <div class="info-row"><span class="ik">Logins Today</span><span class="iv c-cyan">@Model.TodayLogins</span></div>
+                    <div class="info-row">
+                        <span class="ik">User Accounts</span>
+                        <span class="iv">
+                            <span class="c-green">@Model.ActiveUsers</span>
+                            <span class="text-secondary"> active</span>
+                            @if (Model.BannedUsers > 0)
+                            {
+                                <span class="ms-1"><span class="c-red">@Model.BannedUsers</span> <span class="text-secondary">banned</span></span>
+                            }
+                            @if (Model.LockedUsers > 0)
+                            {
+                                <span class="ms-1"><span class="c-yellow">@Model.LockedUsers</span> <span class="text-secondary">locked</span></span>
+                            }
+                        </span>
+                    </div>
+                    <div class="info-row"><span class="ik">Security Events Today</span><span class="iv @(Model.SecurityEventsToday > 0 ? "c-yellow" : "c-green")">@Model.SecurityEventsToday</span></div>
+                    <div class="info-row"><span class="ik">Error Logs</span><span class="iv @(Model.ErrorLogsToday > 0 ? "c-red" : "c-green")">@Model.ErrorLogsToday</span></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ── Row 3: Active Sessions ─────────────────────────────────────────── -->
+    <div class="section-card mb-3">
+        <div class="section-header">
+            <i class="bi bi-people-fill"></i> Active Sessions
+            <span class="cnt" id="cnt-sessions">@Model.ActiveSessions.Count</span>
+        </div>
+        @if (Model.ActiveSessions.Count == 0)
+        {
+            <div class="empty-state"><i class="bi bi-person-x"></i>No active sessions</div>
+        }
+        else
+        {
+            <table class="table dash-table">
+                <thead>
+                    <tr>
+                        <th>Player</th>
+                        <th>Session ID</th>
+                        <th>Auth</th>
+                        <th>Room</th>
+                        <th>Last Activity</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var s in Model.ActiveSessions)
+                    {
+                        <tr>
+                            <td><i class="bi bi-person me-1 text-secondary"></i>@s.PlayerName</td>
+                            <td class="mono text-secondary" style="font-size:.72rem">@s.Id[..8]…</td>
+                            <td>
+                                @if (s.IsAuthenticated)
+                                {
+                                    <span class="badge bg-success" style="font-size:.68rem"><i class="bi bi-check-circle me-1"></i>Auth</span>
+                                }
+                                else
+                                {
+                                    <span class="badge bg-secondary" style="font-size:.68rem">Guest</span>
+                                }
+                            </td>
+                            <td class="text-secondary">
+                                @if (s.CurrentRoomId != null)
+                                {
+                                    <span class="mono" style="font-size:.72rem">@s.CurrentRoomId[..8]…</span>
+                                }
+                                else
+                                {
+                                    <span class="text-muted">—</span>
+                                }
+                            </td>
+                            <td class="text-secondary" style="font-size:.78rem">@s.LastActivity.ToString("HH:mm:ss") UTC</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        }
+    </div>
+
+    <!-- ── Row 4: Active Rooms ───────────────────────────────────────────── -->
+    <div class="section-card mb-3">
+        <div class="section-header">
+            <i class="bi bi-controller"></i> Active Rooms
+            <span class="cnt" id="cnt-rooms">@Model.ActiveRooms.Count</span>
+        </div>
+        @if (Model.ActiveRooms.Count == 0)
+        {
+            <div class="empty-state"><i class="bi bi-grid-3x3-gap"></i>No active rooms</div>
+        }
+        else
+        {
+            <table class="table dash-table">
+                <thead>
+                    <tr>
+                        <th>Room Name</th>
+                        <th>Room ID</th>
+                        <th>Players</th>
+                        <th>Max</th>
+                        <th>Created</th>
+                        <th>Host Session</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var r in Model.ActiveRooms.OrderByDescending(x => x.PlayerCount))
+                    {
+                        var fill = r.MaxPlayers > 0 ? (double)r.PlayerCount / r.MaxPlayers : 0;
+                        var barColor = fill > .8 ? "bg-danger" : fill > .5 ? "bg-warning" : "bg-success";
+                        <tr>
+                            <td><i class="bi bi-pin-angle me-1 text-secondary"></i>@r.Name</td>
+                            <td class="mono text-secondary" style="font-size:.72rem">@r.Id[..8]…</td>
+                            <td>
+                                <span class="fw-bold">@r.PlayerCount</span>
+                                <div class="progress mt-1" style="height:3px;width:70px">
+                                    <div class="progress-bar @barColor" style="width:@((int)(fill*100))%"></div>
+                                </div>
+                            </td>
+                            <td class="text-secondary">@r.MaxPlayers</td>
+                            <td class="text-secondary" style="font-size:.78rem">@r.CreatedAt.ToString("HH:mm:ss") UTC</td>
+                            <td class="mono text-secondary" style="font-size:.72rem">
+                                @(r.HostId != null && r.HostId.Length >= 8 ? r.HostId[..8] + "…" : r.HostId ?? "—")
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        }
+    </div>
+
+    <!-- ── Row 5: Security + Connections ─────────────────────────────────── -->
+    <div class="row g-3 mb-3">
+        <!-- Security Events -->
+        <div class="col-lg-6">
+            <div class="section-card h-100">
+                <div class="section-header">
+                    <i class="bi bi-shield-exclamation"></i> Recent Security Events
+                    <span class="cnt">@Model.RecentSecurityEvents.Count</span>
+                </div>
+                @if (Model.RecentSecurityEvents.Count == 0)
+                {
+                    <div class="empty-state"><i class="bi bi-shield-check"></i>No security events recorded</div>
+                }
+                else
+                {
+                    <table class="table dash-table">
+                        <thead>
+                            <tr>
+                                <th>Time</th>
+                                <th>Type</th>
+                                <th>Severity</th>
+                                <th>IP</th>
+                                <th>Status</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var e in Model.RecentSecurityEvents)
+                            {
+                                <tr>
+                                    <td class="text-secondary" style="font-size:.72rem;white-space:nowrap">@e.Timestamp.ToString("MM-dd HH:mm")</td>
+                                    <td class="mono" style="font-size:.72rem">@e.EventType</td>
+                                    <td><span class="@severityBadge(e.Severity)" style="font-size:.66rem">@severityLabel(e.Severity)</span></td>
+                                    <td class="mono text-secondary" style="font-size:.72rem">@e.IpAddress</td>
+                                    <td>
+                                        @if (e.IsResolved)
+                                        {
+                                            <i class="bi bi-check-circle-fill text-success" title="Resolved"></i>
+                                        }
+                                        else
+                                        {
+                                            <i class="bi bi-exclamation-circle-fill text-warning" title="Unresolved"></i>
+                                        }
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                }
+            </div>
+        </div>
+        <!-- Recent Connections -->
+        <div class="col-lg-6">
+            <div class="section-card h-100">
+                <div class="section-header">
+                    <i class="bi bi-plug-fill"></i> Recent Connections
+                    <span class="cnt">@Model.RecentConnections.Count</span>
+                </div>
+                @if (Model.RecentConnections.Count == 0)
+                {
+                    <div class="empty-state"><i class="bi bi-wifi-off"></i>No connection logs</div>
+                }
+                else
+                {
+                    <table class="table dash-table">
+                        <thead>
+                            <tr>
+                                <th>Time</th>
+                                <th>Event</th>
+                                <th>Player</th>
+                                <th>IP</th>
+                                <th>TLS</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var c in Model.RecentConnections)
+                            {
+                                <tr>
+                                    <td class="text-secondary" style="font-size:.72rem;white-space:nowrap">@c.Timestamp.ToString("MM-dd HH:mm")</td>
+                                    <td>
+                                        @if (c.EventType == "Connect")
+                                        {
+                                            <span class="badge bg-success" style="font-size:.66rem">Connect</span>
+                                        }
+                                        else if (c.EventType == "Disconnect")
+                                        {
+                                            <span class="badge bg-secondary" style="font-size:.66rem">Disconnect</span>
+                                        }
+                                        else
+                                        {
+                                            <span class="badge bg-warning text-dark" style="font-size:.66rem">@c.EventType</span>
+                                        }
+                                    </td>
+                                    <td style="font-size:.78rem">@(c.PlayerName ?? "—")</td>
+                                    <td class="mono text-secondary" style="font-size:.72rem">@c.IpAddress</td>
+                                    <td>
+                                        @if (c.UsedTls)
+                                        {
+                                            <i class="bi bi-lock-fill text-success" title="TLS"></i>
+                                        }
+                                        else
+                                        {
+                                            <i class="bi bi-unlock text-secondary" title="Plain"></i>
+                                        }
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                }
+            </div>
+        </div>
+    </div>
+
+    <!-- ── Row 6: Server Logs ─────────────────────────────────────────────── -->
+    <div class="section-card mb-4">
+        <div class="section-header">
+            <i class="bi bi-journal-text"></i> Recent Server Logs
+            <span class="cnt">@Model.RecentServerLogs.Count</span>
+        </div>
+        @if (Model.RecentServerLogs.Count == 0)
+        {
+            <div class="empty-state"><i class="bi bi-journal"></i>No server logs</div>
+        }
+        else
+        {
+            <table class="table dash-table">
+                <thead>
+                    <tr>
+                        <th>Time</th>
+                        <th>Level</th>
+                        <th>Category</th>
+                        <th>Message</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var log in Model.RecentServerLogs)
+                    {
+                        <tr>
+                            <td class="text-secondary" style="font-size:.72rem;white-space:nowrap">@log.Timestamp.ToString("MM-dd HH:mm:ss")</td>
+                            <td>
+                                <span class="@logLevelClass(log.Level) fw-semibold" style="font-size:.75rem">@log.Level</span>
+                            </td>
+                            <td class="text-secondary mono" style="font-size:.72rem">@log.Category</td>
+                            <td style="font-size:.78rem; max-width:480px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap"
+                                title="@log.Message">@log.Message</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        }
+    </div>
+
+</div><!-- /container -->
+
+@section Scripts {
+<script>
+(function () {
+    let failCount = 0;
+
+    function fmtTime() {
+        return new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    }
+
+    function refreshStats() {
+        fetch('/Dashboard/Stats')
+            .then(r => r.json())
+            .then(d => {
+                failCount = 0;
+                document.getElementById('stat-sessions').textContent  = d.sessions;
+                document.getElementById('stat-rooms').textContent     = d.rooms;
+                document.getElementById('stat-uptime').textContent    = d.uptime;
+                document.getElementById('info-uptime').textContent    = d.uptime;
+                document.getElementById('cnt-sessions').textContent   = d.sessions;
+                document.getElementById('cnt-rooms').textContent      = d.rooms;
+                document.getElementById('last-refresh').innerHTML =
+                    '<i class="bi bi-arrow-repeat me-1"></i>Updated ' + fmtTime();
+            })
+            .catch(() => {
+                failCount++;
+                document.getElementById('last-refresh').innerHTML =
+                    '<i class="bi bi-exclamation-circle me-1 text-warning"></i>Retry…';
+                if (failCount > 3) {
+                    // Full reload after repeated failures
+                    window.location.reload();
+                }
+            });
+    }
+
+    // Kick off right away then every 5 s
+    refreshStats();
+    setInterval(refreshStats, 5000);
+}());
+</script>
+}

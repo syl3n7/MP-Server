@@ -37,15 +37,11 @@ The joining client learns it joined but gets no information about who is already
 Server tracks a 0-based slot per player, but this value is never sent to the client. The comment says "client resolves world position from its own scene" but it never learns which slot it occupies.  
 **Fix needed:** Include `spawnSlot` in `JOIN_OK` response (and in `PLAYER_JOINED` broadcast for other clients).
 
-### 5. `START_GAME` command is not broadcast to room members
-**File:** `Transport/PlayerSession.cs` — `START_GAME` handler  
-Only the caller knows the game started. All other players in the room are unaware.  
-**Fix needed:** Broadcast `{"command":"GAME_STARTED","roomId":"...","startedBy":"..."}` to all room members.
+### 5. ~~`START_GAME` command is not broadcast to room members~~ ✅ Already implemented
+`BroadcastToRoomAsync` is called in the `START_GAME` handler. All room members receive `GAME_STARTED`. No action needed.
 
-### 6. No `LEAVE_ROOM` command
-**File:** `Transport/PlayerSession.cs`  
-There is no explicit leave mechanism. Rooms can only be vacated by disconnecting entirely. Rooms accumulate empty entries on a long-running server.  
-**Fix needed:** Add a `LEAVE_ROOM` command that removes the player from the room and triggers a `PLAYER_LEFT` broadcast.
+### 6. ~~No `LEAVE_ROOM` command~~ ✅ Already implemented
+`LEAVE_ROOM` command exists in `PlayerSession.cs` with full host-transfer logic. No action needed.
 
 ---
 
@@ -137,8 +133,8 @@ No validation on Unicode control characters, zero-width spaces, or excessively l
 | 🔴 Critical | 2 | `PLAYER_LEFT` broadcast | 🔜 |
 | 🔴 Critical | 3 | `JOIN_OK` returns current player list + spawnSlot | 🔜 |
 | 🔴 Critical | 4 | Spawn slot sent to client | 🔜 (part of #3) |
-| 🔴 Critical | 5 | `START_GAME` broadcast to room | 🔜 |
-| 🔴 Critical | 6 | `LEAVE_ROOM` command | 🔜 |
+| 🔴 Critical | 5 | `START_GAME` broadcast to room | ✅ Fixed |
+| 🔴 Critical | 6 | `LEAVE_ROOM` command | ✅ Fixed |
 | 🟡 High | 7 | Physics constants → `appsettings.json` | 🔜 |
 | 🟡 High | 8 | World bounds → `appsettings.json` | 🔜 |
 | 🟠 Medium | 9 | Cert password → config | 🔜 |

@@ -64,7 +64,12 @@ public sealed class GameServer : IHostedService, IDisposable
 
     // Server info
     public DateTime StartTime { get; private set; }
-    
+    public int TcpPort => _tcpPort;
+    public int UdpPort => _udpPort;
+    public bool UseTls => _useTls;
+    public string PublicIp => _publicIp;
+    public string Hostname => _hostname;
+
     // Security system access
     public SecurityManager SecurityManager => _securityManager;
     public DatabaseLoggingService? DatabaseLoggingService => _dbLoggingService;
