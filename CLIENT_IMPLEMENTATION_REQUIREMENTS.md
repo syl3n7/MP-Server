@@ -1,15 +1,13 @@
 # MP-Server Client Implementation Requirements
 
-## 🚨 **CRITICAL ISSUES IDENTIFIED**
+This document defines the mandatory client-side requirements for connecting to MP-Server.
 
-Based on server error logs showing `'0xEF' is an invalid start of a value` errors, the client is sending **malformed UDP packets**. This guide addresses the critical implementation requirements to fix these issues.
+## ❌ **Common Client Mistakes**
 
-## ❌ **Current Client Problems**
-
-1. **UDP Encryption Missing**: Client is sending unencrypted UDP packets, but server expects AES-encrypted data after authentication
-2. **Malformed JSON**: Client may be sending invalid JSON or binary data as text
-3. **UTF-8 BOM Issues**: Possible UTF-8 Byte Order Mark contamination (`0xEF 0xBB 0xBF`)
-4. **Incorrect Message Format**: UDP packets must follow specific JSON structure
+1. **UDP Encryption Missing**: Client sending unencrypted UDP packets — server rejects all unencrypted UDP from authenticated sessions
+2. **Malformed JSON**: Client sending invalid JSON or binary data as text
+3. **UTF-8 BOM Issues**: UTF-8 Byte Order Mark contamination (`0xEF 0xBB 0xBF`) — use `new UTF8Encoding(false)` / `json.dumps` without BOM
+4. **Incorrect Message Format**: UDP packets must follow the JSON structure below
 
 ---
 
@@ -79,8 +77,9 @@ public class UdpEncryption
     private readonly byte[] _key;
     private readonly byte[] _iv;
     
-    public UdpEncryption(string sessionId, string sharedSecret = "RacingServerUDP2024!")
+    public UdpEncryption(string sessionId, string sharedSecret)
     {
+        // sharedSecret must match SecurityConfig:UdpSharedSecret in appsettings.json
         using var sha256 = SHA256.Create();
         var keySource = Encoding.UTF8.GetBytes(sessionId + sharedSecret);
         var keyHash = sha256.ComputeHash(keySource);
@@ -146,7 +145,7 @@ public class UdpEncryption
 {
   "command": "INPUT",
   "sessionId": "your_tcp_session_id",
-  "inputData": {
+  "input": {
     "throttle": 0.8,
     "brake": 0.0,
     "steering": -0.3
@@ -322,9 +321,9 @@ Debug.Log($"Decrypted: {decrypted}");
 
 ## 🚨 **CRITICAL SECURITY NOTES**
 
-1. **Never send unencrypted UDP packets after authentication**
+1. **Never send unencrypted UDP packets after authentication — server will reject them**
 2. **Always validate auth success (REGISTER_OK / LOGIN_OK / AUTO_AUTH_OK) before UDP transmission**
-3. **Use the exact shared secret: `"RacingServerUDP2024!"`**
+3. **Use the shared secret configured in `SecurityConfig:UdpSharedSecret` in `appsettings.json`**
 4. **Session ID must match TCP session ID exactly**
 5. **Store the auth token securely; do not expose it in logs**
 6. **After 3 failed LOGIN attempts the account is locked for 30 minutes**
@@ -352,4 +351,4 @@ Debug.Log($"Decrypted: {decrypted}");
 
 ---
 
-This implementation guide should resolve all current client issues and ensure proper communication with the MP-Server. The UDP encryption is **mandatory** - the server will reject all unencrypted UDP packets after authentication.
+This implementation guide ensures proper communication with MP-Server. UDP encryption is **mandatory** — the server rejects all unencrypted UDP packets from authenticated sessions.

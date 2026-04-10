@@ -34,7 +34,7 @@ This guide consolidates the authentication refactor with your research requireme
 | 1 | 🔴 Security | UDP `sessionId` cross-validation — verify payload `sessionId` matches the session used to decrypt the packet | `Transport/GameServer.cs` — `ProcessUdpPacketAsync` | ✅ |
 | 2 | 🟠 Tech debt | Wire up `SecurityManager` kick stub — `// TODO: Implement actual kick mechanism` | `Security/SecurityManager.cs:191` | ✅ |
 | 3 | 🟢 Structure | Move `ConsoleUI.cs` → `Observability/ConsoleUI.cs`, update namespace to `MP.Server.Observability`, fix usages in `Program.cs` | `ConsoleUI.cs`, `Program.cs` | ✅ |
-| 4 | 🟢 Docs | Update `CLIENT_IMPLEMENTATION_GUIDE.md` + `CLIENT_IMPLEMENTATION_REQUIREMENTS.md` — remove SHA-256 / `AUTHENTICATE` / first-come references, document current auth protocol | `CLIENT_IMPLEMENTATION_GUIDE.md`, `CLIENT_IMPLEMENTATION_REQUIREMENTS.md` | 🔜 |
+| 4 | 🟢 Docs | Update `CLIENT_IMPLEMENTATION_GUIDE.md` + `CLIENT_IMPLEMENTATION_REQUIREMENTS.md` — remove SHA-256 / `AUTHENTICATE` / first-come references, document current auth protocol | `CLIENT_IMPLEMENTATION_GUIDE.md`, `CLIENT_IMPLEMENTATION_REQUIREMENTS.md` | ✅ |
 
 ---
 

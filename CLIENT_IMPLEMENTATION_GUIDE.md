@@ -18,20 +18,20 @@ This comprehensive guide provides everything needed to implement a secure client
 
 ## 1. Overview
 
-The MP-Server is a secure multiplayer racing server that uses:
+MP-Server is a secure general-purpose multiplayer server that uses:
 - **TLS-encrypted TCP** on port 443 for commands and room management
 - **AES-encrypted UDP** on port 443 for real-time position/input updates
-- **Password-based authentication** for player identity protection
-- **Self-signed certificates** with automatic generation including public IP support
+- **DB-backed, token-based authentication** (BCrypt + persistent 30-day tokens)
+- **Self-signed certificates** with automatic generation and configurable public IP
 
 ### 1.1 Connection Flow
 
 ```
 1. Client connects via TLS to server:443
-2. Server sends: CONNECTED|<sessionId>
-3. Client authenticates with NAME command + password
-4. Server responds with NAME_OK + UDP encryption keys
-5. Client can now use UDP for real-time updates
+2. Server sends: {"command":"CONNECTED","sessionId":"<id>"}
+3. Client registers (first run) or logs in / auto-auths (returning player)
+4. Server responds with REGISTER_OK / LOGIN_OK / AUTO_AUTH_OK
+5. UDP encryption is now active for the session
 6. All TCP commands and UDP packets are encrypted
 ```
 
@@ -48,15 +48,17 @@ The MP-Server is a secure multiplayer racing server that uses:
 ### 2.1 TLS Configuration
 
 The server uses TLS 1.2/1.3 with:
-- **Auto-generated certificates** including public IP (89.114.116.19)
+- **Auto-generated certificates** including a configurable public IP (`ServerSettings:PublicIP` in `appsettings.json` or `SERVER_PUBLIC_IP` env var)
 - **Subject Alternative Names** for all network interfaces
 - **Modern cipher suites** with forward secrecy
 - **Self-signed root** for LAN/development use
 
 ### 2.2 Authentication System
 
-- **SHA-256 password hashing** (should upgrade to bcrypt for production)
-- **First-come, first-served** username registration
+- **BCrypt password hashing** for all stored passwords
+- **DB-backed persistent auth** — accounts survive server restarts
+- **Token-based sessions** — 30-day tokens stored as SHA-256 hashes; clients use `AUTO_AUTH` on reconnect
+- **Account lockout** — 3 failed login attempts triggers a 30-minute lock
 - **Session-based access control** with command filtering
 - **Automatic session cleanup** after 60 seconds of inactivity
 
@@ -197,12 +199,17 @@ public async Task<bool> ConnectToServer(string host, int port = 443)
         _reader = new StreamReader(sslStream, Encoding.UTF8);
         _writer = new StreamWriter(sslStream, Encoding.UTF8) { AutoFlush = true };
         
-        // Read welcome message
+        // Read welcome message — server sends: {"command":"CONNECTED","sessionId":"..."}
         string welcome = await _reader.ReadLineAsync();
-        if (welcome?.StartsWith("CONNECTED|") == true)
+        if (welcome != null)
         {
-            _sessionId = welcome.Split('|')[1];
-            return true;
+            var welDoc = JsonSerializer.Deserialize<JsonElement>(welcome);
+            if (welDoc.TryGetProperty("command", out var cmd) && cmd.GetString() == "CONNECTED"
+                && welDoc.TryGetProperty("sessionId", out var sid))
+            {
+                _sessionId = sid.GetString();
+                return true;
+            }
         }
         
         throw new Exception($"Invalid welcome message: {welcome}");
@@ -391,7 +398,8 @@ public class UdpCrypto
     private readonly byte[] _key;
     private readonly byte[] _iv;
     
-    public UdpCrypto(string sessionId, string sharedSecret = "RacingServerUDP2024!")
+    // sharedSecret must match SecurityConfig:UdpSharedSecret in appsettings.json
+    public UdpCrypto(string sessionId, string sharedSecret)
     {
         // Derive encryption key from session ID and shared secret
         using var sha256 = SHA256.Create();
@@ -579,23 +587,71 @@ public class RacingClient
         return true;
     }
     
-    public async Task<bool> Authenticate(string username, string password)
+    public async Task<bool> Register(string username, string password, string email = "")
     {
         try
         {
-            var command = new { command = "NAME", name = username, password = password };
-            await SendCommand(command);
-            
-            // Wait for response (will be handled in ListenForMessages)
-            await Task.Delay(1000);
-            return _isAuthenticated;
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"Authentication failed: {ex.Message}");
+            await SendCommand(new { command = "REGISTER", username, password, email });
+            string response = await _reader.ReadLineAsync();
+            var result = JsonSerializer.Deserialize<JsonElement>(response);
+            if (result.GetProperty("command").GetString() == "REGISTER_OK")
+            {
+                _sessionId = result.GetProperty("sessionId").GetString() ?? _sessionId;
+                SaveToken(result.GetProperty("token").GetString());
+                _isAuthenticated = true;
+                SetupUdpEncryption();
+                return true;
+            }
+            Console.WriteLine($"REGISTER failed: {result.GetProperty("message").GetString()}");
             return false;
         }
+        catch (Exception ex) { Console.WriteLine($"Register error: {ex.Message}"); return false; }
     }
+
+    public async Task<bool> Login(string username, string password)
+    {
+        try
+        {
+            await SendCommand(new { command = "LOGIN", username, password });
+            string response = await _reader.ReadLineAsync();
+            var result = JsonSerializer.Deserialize<JsonElement>(response);
+            if (result.GetProperty("command").GetString() == "LOGIN_OK")
+            {
+                SaveToken(result.GetProperty("token").GetString());
+                _isAuthenticated = true;
+                SetupUdpEncryption();
+                return true;
+            }
+            Console.WriteLine($"LOGIN failed: {result.GetProperty("message").GetString()}");
+            return false;
+        }
+        catch (Exception ex) { Console.WriteLine($"Login error: {ex.Message}"); return false; }
+    }
+
+    public async Task<bool> TryAutoAuth()
+    {
+        string token = LoadToken();
+        if (string.IsNullOrEmpty(token)) return false;
+        try
+        {
+            await SendCommand(new { command = "AUTO_AUTH", token });
+            string response = await _reader.ReadLineAsync();
+            var result = JsonSerializer.Deserialize<JsonElement>(response);
+            if (result.GetProperty("command").GetString() == "AUTO_AUTH_OK")
+            {
+                _isAuthenticated = true;
+                SetupUdpEncryption();
+                return true;
+            }
+            DeleteToken(); // expired or revoked
+            return false;
+        }
+        catch (Exception ex) { Console.WriteLine($"AutoAuth error: {ex.Message}"); return false; }
+    }
+
+    private void SaveToken(string token) { /* persist to disk/prefs */ }
+    private string LoadToken() { return string.Empty; /* load from disk/prefs */ }
+    private void DeleteToken() { /* remove from disk/prefs */ }
     
     public async Task CreateRoom(string roomName)
     {
@@ -625,23 +681,14 @@ public class RacingClient
             rotation = new { x = rx, y = ry, z = rz, w = rw }
         };
         
-        if (_udpCrypto != null)
-        {
-            // Send encrypted
-            string json = JsonSerializer.Serialize(update);
-            byte[] encrypted = _udpCrypto.Encrypt(json);
-            byte[] packet = new byte[4 + encrypted.Length];
-            BitConverter.GetBytes(encrypted.Length).CopyTo(packet, 0);
-            encrypted.CopyTo(packet, 4);
-            await _udpClient.SendAsync(packet, packet.Length, "localhost", 443);
-        }
-        else
-        {
-            // Send plain text
-            string json = JsonSerializer.Serialize(update);
-            byte[] data = Encoding.UTF8.GetBytes(json);
-            await _udpClient.SendAsync(data, data.Length, "localhost", 443);
-        }
+        // All UDP packets MUST be encrypted after authentication
+        if (_udpCrypto == null) throw new InvalidOperationException("UDP crypto not initialised — authenticate first");
+        string json = JsonSerializer.Serialize(update);
+        byte[] encrypted = _udpCrypto.Encrypt(json);
+        byte[] packet = new byte[4 + encrypted.Length];
+        BitConverter.GetBytes(encrypted.Length).CopyTo(packet, 0);
+        encrypted.CopyTo(packet, 4);
+        await _udpClient.SendAsync(packet, packet.Length, "localhost", 443);
     }
     
     private async Task SendCommand(object command)
@@ -679,17 +726,18 @@ public class RacingClient
             
             switch (command)
             {
-                case "NAME_OK":
-                    _isAuthenticated = json.GetProperty("authenticated").GetBoolean();
-                    if (_isAuthenticated && json.TryGetProperty("udpEncryption", out var udpEl) && udpEl.GetBoolean())
-                    {
-                        SetupUdpEncryption();
-                    }
-                    Console.WriteLine($"Authentication successful: {_isAuthenticated}");
+                case "REGISTER_OK":
+                case "LOGIN_OK":
+                case "AUTO_AUTH_OK":
+                    // Auth is handled synchronously in Register/Login/TryAutoAuth above.
+                    // These cases handle unsolicited re-auth responses if needed.
+                    Console.WriteLine($"Auth acknowledged: {command}");
                     break;
-                    
-                case "AUTH_FAILED":
-                    Console.WriteLine($"Authentication failed: {json.GetProperty("message").GetString()}");
+
+                case "REGISTER_FAILED":
+                case "LOGIN_FAILED":
+                case "AUTO_AUTH_FAILED":
+                    Console.WriteLine($"Auth failed ({command}): {json.GetProperty("message").GetString()}");
                     break;
                     
                 case "ROOM_CREATED":
@@ -737,7 +785,11 @@ class Program
         
         if (await client.Connect("localhost"))
         {
-            if (await client.Authenticate("TestPlayer", "password123"))
+            // Try stored token first; fall back to login/register
+            bool authed = await client.TryAutoAuth()
+                       || await client.Login("TestPlayer", "password123");
+
+            if (authed)
             {
                 await client.CreateRoom("Test Room");
                 await client.StartGame();
@@ -782,7 +834,7 @@ class RacingClient:
         self.udp_crypto = None
         
     async def connect(self):
-        """Connect to the racing server with TLS encryption"""
+        """Connect to the server with TLS encryption"""
         try:
             # Create TLS context that accepts self-signed certificates
             context = ssl.create_default_context()
@@ -794,12 +846,12 @@ class RacingClient:
                 self.host, self.port, ssl=context
             )
             
-            # Read welcome message
+            # Read welcome message — server sends: {"command":"CONNECTED","sessionId":"..."}
             welcome = await self.reader.readline()
-            welcome_str = welcome.decode().strip()
+            welcome_data = json.loads(welcome.decode().strip())
             
-            if welcome_str.startswith("CONNECTED|"):
-                self.session_id = welcome_str.split("|")[1]
+            if welcome_data.get("command") == "CONNECTED":
+                self.session_id = welcome_data["sessionId"]
                 print(f"Connected with session ID: {self.session_id}")
                 
                 # Start listening for messages
@@ -810,18 +862,51 @@ class RacingClient:
             print(f"Connection failed: {e}")
             return False
     
-    async def authenticate(self, username, password):
-        """Authenticate with username and password"""
-        command = {
-            "command": "NAME",
-            "name": username,
-            "password": password
-        }
-        await self._send_command(command)
-        
-        # Wait a bit for response
-        await asyncio.sleep(0.5)
-        return self.is_authenticated
+    async def login(self, username, password):
+        """Login with username and password"""
+        await self._send_command({"command": "LOGIN", "username": username, "password": password})
+        line = await self.reader.readline()
+        data = json.loads(line.decode().strip())
+        if data.get("command") == "LOGIN_OK":
+            self._save_token(data["token"])
+            self.is_authenticated = True
+            self._setup_udp_encryption()
+            return True
+        print(f"LOGIN failed: {data.get('message')}")
+        return False
+
+    async def register(self, username, password, email=""):
+        """Register a new account"""
+        await self._send_command({"command": "REGISTER", "username": username, "password": password, "email": email})
+        line = await self.reader.readline()
+        data = json.loads(line.decode().strip())
+        if data.get("command") == "REGISTER_OK":
+            self._save_token(data["token"])
+            self.is_authenticated = True
+            self._setup_udp_encryption()
+            return True
+        print(f"REGISTER failed: {data.get('message')}")
+        return False
+
+    async def try_auto_auth(self):
+        """Attempt silent re-auth with stored token"""
+        token = self._load_token()
+        if not token:
+            return False
+        await self._send_command({"command": "AUTO_AUTH", "token": token})
+        line = await self.reader.readline()
+        data = json.loads(line.decode().strip())
+        if data.get("command") == "AUTO_AUTH_OK":
+            self.is_authenticated = True
+            self._setup_udp_encryption()
+            return True
+        self._delete_token()  # expired or revoked
+        return False
+
+    def _save_token(self, token): pass  # persist to disk
+    def _load_token(self): return None  # load from disk
+    def _delete_token(self): pass  # remove from disk
+    def _setup_udp_encryption(self): pass  # initialise self.udp_crypto
     
     async def create_room(self, room_name):
         """Create a new racing room"""
@@ -853,14 +938,12 @@ class RacingClient:
         
         json_data = json.dumps(update)
         
-        if self.udp_crypto:
-            # Send encrypted
-            encrypted_data = self.udp_crypto.encrypt(json_data)
-            packet = struct.pack('<I', len(encrypted_data)) + encrypted_data
-            self.udp_socket.sendto(packet, (self.host, self.port))
-        else:
-            # Send plain text
-            self.udp_socket.sendto(json_data.encode(), (self.host, self.port))
+        # All UDP packets MUST be encrypted after authentication
+        if not self.udp_crypto:
+            raise RuntimeError("UDP crypto not initialised — authenticate first")
+        encrypted_data = self.udp_crypto.encrypt(json_data)
+        packet = struct.pack('<I', len(encrypted_data)) + encrypted_data
+        self.udp_socket.sendto(packet, (self.host, self.port))
     
     async def _send_command(self, command):
         """Send JSON command over TCP"""
@@ -890,14 +973,12 @@ class RacingClient:
             data = json.loads(message)
             command = data.get("command")
             
-            if command == "NAME_OK":
-                self.is_authenticated = data.get("authenticated", False)
-                if self.is_authenticated and data.get("udpEncryption", False):
-                    self._setup_udp_encryption()
-                print(f"Authentication successful: {self.is_authenticated}")
-                
-            elif command == "AUTH_FAILED":
-                print(f"Authentication failed: {data.get('message')}")
+            if command in ("REGISTER_OK", "LOGIN_OK", "AUTO_AUTH_OK"):
+                # Auth is handled synchronously in login/register/try_auto_auth above.
+                print(f"Auth acknowledged: {command}")
+
+            elif command in ("REGISTER_FAILED", "LOGIN_FAILED", "AUTO_AUTH_FAILED"):
+                print(f"Auth failed ({command}): {data.get('message')}")
                 
             elif command == "ROOM_CREATED":
                 room_id = data.get("roomId")
