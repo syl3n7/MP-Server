@@ -19,13 +19,16 @@ using MP.Server;
 using MP.Server.Diagnostics;
 using MP.Server.Security;
 using MP.Server.Services;
+using MP.Server.Domain;
 
-public sealed class RacingServer : IHostedService, IDisposable
+namespace MP.Server.Transport;
+
+public sealed class GameServer : IHostedService, IDisposable
 {
     private readonly int _tcpPort;
     private readonly int _udpPort;
-    private readonly ILogger<RacingServer> _logger;
-    internal ILogger<RacingServer> Logger => _logger;
+    private readonly ILogger<GameServer> _logger;
+    internal ILogger<GameServer> Logger => _logger;
     private readonly CancellationTokenSource _cts = new();
     
     // Security system
@@ -50,6 +53,10 @@ public sealed class RacingServer : IHostedService, IDisposable
     // Set via SERVER_PUBLIC_IP env var or appsettings ServerSettings:PublicIP.
     private readonly string _publicIp;
 
+    // Hostname baked into the self-signed certificate CN/SAN.
+    // Set via SERVER_HOSTNAME env var or appsettings ServerSettings:Hostname.
+    private readonly string _hostname;
+
     // Threading
     private Task? _tcpAcceptTask;
     private Task? _udpReceiveTask;
@@ -62,16 +69,19 @@ public sealed class RacingServer : IHostedService, IDisposable
     public SecurityManager SecurityManager => _securityManager;
     public DatabaseLoggingService? DatabaseLoggingService => _dbLoggingService;
     
-    public RacingServer(int tcpPort, int udpPort, ILogger<RacingServer>? logger = null, bool useTls = true, X509Certificate2? certificate = null, SecurityConfig? securityConfig = null, DatabaseLoggingService? dbLoggingService = null, AuthService? authService = null, string? publicIp = null)
+    public GameServer(int tcpPort, int udpPort, ILogger<GameServer>? logger = null, bool useTls = true, X509Certificate2? certificate = null, SecurityConfig? securityConfig = null, DatabaseLoggingService? dbLoggingService = null, AuthService? authService = null, string? publicIp = null, string? hostname = null)
     {
         _authService = authService;
         _tcpPort = tcpPort;
         _udpPort = udpPort;
-        _logger = logger ?? LoggerFactory.Create(b => b.AddConsole()).CreateLogger<RacingServer>();
+        _logger = logger ?? LoggerFactory.Create(b => b.AddConsole()).CreateLogger<GameServer>();
         _useTls = useTls;
         _publicIp = publicIp
             ?? Environment.GetEnvironmentVariable("SERVER_PUBLIC_IP")
             ?? "0.0.0.0";
+        _hostname = hostname
+            ?? Environment.GetEnvironmentVariable("SERVER_HOSTNAME")
+            ?? "mp-server";
         _serverCertificate = certificate ?? GenerateOrLoadCertificate();
         _dbLoggingService = dbLoggingService;
         
@@ -97,7 +107,7 @@ public sealed class RacingServer : IHostedService, IDisposable
                 {
                     await _dbLoggingService.LogServerEventAsync(
                         level: "Info",
-                        category: "RacingServer",
+                        category: "GameServer",
                         message: $"Server initialized with {(_useTls ? "TLS/SSL" : "Plain text")} mode on ports TCP:{tcpPort}, UDP:{udpPort}"
                     );
                 }
@@ -112,7 +122,7 @@ public sealed class RacingServer : IHostedService, IDisposable
         StartTime = DateTime.UtcNow;
         
         // Print diagnostic information
-        _logger.LogInformation("🚀 Starting Racing Server...");
+        _logger.LogInformation("🚀 Starting Game Server...");
         MP.Server.Diagnostics.NetworkDiagnostics.PrintNetworkInfo(_logger);
         MP.Server.Diagnostics.NetworkDiagnostics.PrintCertificateInfo(_serverCertificate, _logger);
         
@@ -143,7 +153,7 @@ public sealed class RacingServer : IHostedService, IDisposable
                 {
                     await _dbLoggingService.LogServerEventAsync(
                         level: "Info",
-                        category: "RacingServer",
+                        category: "GameServer",
                         message: $"Server started successfully on TCP:{_tcpPort} UDP:{_udpPort}"
                     );
                 }
@@ -474,70 +484,91 @@ public sealed class RacingServer : IHostedService, IDisposable
                 return; // Reject the packet
             }
             
-            // Check if this is an UPDATE command
-            if (root.TryGetProperty("command", out JsonElement commandElement))
+            // ── Routing: envelope (action) or legacy (command) ────────────────
+            // Determine the action/command type and whether this is an envelope packet.
+            string? udpAction = null;
+            bool isEnvelope = false;
+            JsonElement payloadEl = default;
+
+            if (root.TryGetProperty("action", out JsonElement actionElement))
             {
-                string? commandType = commandElement.GetString();
-                
-                if (commandType == "UPDATE" && root.TryGetProperty("sessionId", out JsonElement updateSessionIdElement))
+                udpAction = actionElement.GetString()?.ToLower();
+                isEnvelope = true;
+                root.TryGetProperty("payload", out payloadEl);
+            }
+            else if (root.TryGetProperty("command", out JsonElement commandElement))
+            {
+                // Legacy: map known UDP commands to canonical action names
+                udpAction = commandElement.GetString()?.ToUpper() switch
                 {
-                    string? sessionId = updateSessionIdElement.GetString();
-                    
-                    if (string.IsNullOrEmpty(sessionId))
+                    "UPDATE" => "move",
+                    "INPUT"  => "input",
+                    var other => other?.ToLower()
+                };
+            }
+
+            // Session ID is always at the root for both formats
+            root.TryGetProperty("sessionId", out JsonElement sessionIdRootEl);
+            string? rootSessionId = sessionIdRootEl.ValueKind != JsonValueKind.Undefined
+                ? sessionIdRootEl.GetString() : null;
+
+            if (udpAction == "move" && rootSessionId != null)
+            {
+                string? sessionId = rootSessionId;
+
+                if (string.IsNullOrEmpty(sessionId))
+                {
+                    _logger.LogWarning("⚠️ Received UDP move/update with empty sessionId");
+                    return;
+                }
+
+                // Update player UDP endpoint if it's our first packet from this player
+                if (_sessions.TryGetValue(sessionId, out PlayerSession? session) && session != null && session.CurrentRoomId != null)
+                {
+                    // Envelope: position lives under payload; legacy: position lives at root
+                    var posSource = isEnvelope && payloadEl.ValueKind != JsonValueKind.Undefined ? payloadEl : root;
+
+                    var playerInfo = new PlayerInfo(
+                        session.Id,
+                        session.PlayerName,
+                        remoteEndPoint as IPEndPoint,
+                        ParseVector3(posSource, "position"),
+                        ParseQuaternion(posSource, "rotation")
+                    );
+
+                    if (_rooms.TryGetValue(session.CurrentRoomId, out GameRoom? room) && room != null)
                     {
-                        _logger.LogWarning("⚠️ Received UDP update with empty sessionId");
-                        return;
-                    }
-                    
-                    // Update player UDP endpoint if it's our first packet from this player
-                    if (_sessions.TryGetValue(sessionId, out PlayerSession? session) && session != null && session.CurrentRoomId != null)
-                    {
-                        // Create player info with UDP endpoint
-                        var playerInfo = new PlayerInfo(
-                            session.Id,
-                            session.PlayerName,
-                            remoteEndPoint as IPEndPoint,
-                            ParseVector3(root, "position"),
-                            ParseQuaternion(root, "rotation")
-                        );
-                        
-                        // Find the room and update player info
-                        if (_rooms.TryGetValue(session.CurrentRoomId, out GameRoom? room) && room != null)
+                        if (!room.ContainsPlayer(sessionId))
                         {
-                            // Check if player is in room, if not add them
-                            if (!room.ContainsPlayer(sessionId))
-                            {
-                                room.TryAddPlayer(playerInfo);
-                                _logger.LogDebug("🔄 Added player {PlayerId} to room {RoomId} via UDP update", sessionId, session.CurrentRoomId);
-                            }
-                            else
-                            {
-                                // Just update position without remove/add cycle
-                                room.UpdatePlayerPosition(playerInfo);
-                            }
-                            
-                            // Broadcast to all other players in the same room
-                            await BroadcastPositionUpdateAsync(playerInfo, session.CurrentRoomId, sessionId);
+                            room.TryAddPlayer(playerInfo);
+                            _logger.LogDebug("🔄 Added player {PlayerId} to room {RoomId} via UDP move", sessionId, session.CurrentRoomId);
                         }
-                    }
-                }
-                else if (commandType == "INPUT" && root.TryGetProperty("sessionId", out JsonElement inputSessionIdElement))
-                {
-                    // Process INPUT command
-                    string? sessionId = inputSessionIdElement.GetString();
-                    if (!string.IsNullOrEmpty(sessionId) && root.TryGetProperty("roomId", out JsonElement roomIdElement))
-                    {
-                        string? roomId = roomIdElement.GetString();
-                        if (!string.IsNullOrEmpty(roomId) && _rooms.TryGetValue(roomId, out GameRoom? room) && room != null)
+                        else
                         {
-                            await ProcessInputCommandAsync(root, sessionId, roomId);
+                            room.UpdatePlayerPosition(playerInfo);
                         }
+
+                        await BroadcastPositionUpdateAsync(playerInfo, session.CurrentRoomId, sessionId);
                     }
                 }
-                else
+            }
+            else if (udpAction == "input" && rootSessionId != null)
+            {
+                string? sessionId = rootSessionId;
+                // Envelope: roomId may be in root or payload; legacy: roomId at root
+                var inputSource = isEnvelope && payloadEl.ValueKind != JsonValueKind.Undefined ? payloadEl : root;
+                if (!string.IsNullOrEmpty(sessionId) && root.TryGetProperty("roomId", out JsonElement roomIdElement))
                 {
-                    _logger.LogWarning("⚠️ Received malformed UDP packet from {RemoteEndPoint}", remoteEndPoint);
+                    string? roomId = roomIdElement.GetString();
+                    if (!string.IsNullOrEmpty(roomId) && _rooms.TryGetValue(roomId, out GameRoom? room) && room != null)
+                    {
+                        await ProcessInputCommandAsync(root, sessionId, roomId);
+                    }
                 }
+            }
+            else if (udpAction != null)
+            {
+                _logger.LogWarning("⚠️ Unhandled UDP action '{Action}' from {RemoteEndPoint}", udpAction, remoteEndPoint);
             }
             else
             {
@@ -743,12 +774,12 @@ public sealed class RacingServer : IHostedService, IDisposable
         _logger.LogInformation("💓 Heartbeat monitor stopped");
     }
     
-    public GameRoom CreateRoom(string name, string hostId)
+    public GameRoom CreateRoom(string name, string hostId, int maxPlayers = 20)
     {
-        var room = new GameRoom(_dbLoggingService, _logger) { Name = name, HostId = hostId };
+        var room = new GameRoom(_dbLoggingService, _logger) { Name = name, HostId = hostId, MaxPlayers = maxPlayers };
         _rooms.TryAdd(room.Id, room);
-        _logger.LogInformation("🏁 New game room created: {RoomName} (ID: {RoomId}) by host {HostId}", 
-            name, room.Id, hostId);
+        _logger.LogInformation("🏁 New game room created: {RoomName} (ID: {RoomId}) by host {HostId}, maxPlayers={MaxPlayers}", 
+            name, room.Id, hostId, maxPlayers);
         return room;
     }
     
@@ -811,7 +842,7 @@ public sealed class RacingServer : IHostedService, IDisposable
         try
         {
             string certPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "server.pfx");
-            string certPassword = "RacingServer2024!";
+            string certPassword = "MPServer2024!";
             
             // Try to load existing certificate
             if (File.Exists(certPath))
@@ -825,7 +856,7 @@ public sealed class RacingServer : IHostedService, IDisposable
             
             // Use the resolved public IP and optional hostname override
             string publicIp = _publicIp;
-            string hostname = Environment.GetEnvironmentVariable("SERVER_HOSTNAME") ?? "racing-server";
+            string hostname = _hostname;
             
             var cert = GenerateSelfSignedCertificate(hostname, publicIp, certPassword);
             

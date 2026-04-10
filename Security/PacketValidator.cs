@@ -21,9 +21,7 @@ namespace MP.Server.Security
         private const float MAX_UPDATE_INTERVAL = 5.0f; // Maximum 5 seconds between updates
         
         // Input validation ranges
-        private const float MAX_STEERING = 1.0f;
-        private const float MAX_THROTTLE = 1.0f;
-        private const float MAX_BRAKE = 1.0f;
+        private const float MAX_INPUT_AXIS = 1.0f; // Each axis clamped to [-1, 1]
         
         // Player state tracking for validation
         private readonly ConcurrentDictionary<string, PlayerValidationState> _playerStates = new();
@@ -149,39 +147,21 @@ namespace MP.Server.Security
                     return ValidationResult.Accept();
                 }
                 
-                // Validate steering range
-                if (inputElement.TryGetProperty("steering", out var steeringEl))
+                // Validate inputVector axes (x, y, z each in [-1, 1])
+                if (inputElement.TryGetProperty("inputVector", out var vectorEl))
                 {
-                    var steering = steeringEl.GetSingle();
-                    if (Math.Abs(steering) > MAX_STEERING)
+                    foreach (var axis in new[] { "x", "y", "z" })
                     {
-                        _logger.LogWarning("🚫 Player {SessionId} invalid steering value: {Value}", 
-                            sessionId, steering);
-                        return ValidationResult.Reject("Invalid steering input");
-                    }
-                }
-                
-                // Validate throttle range
-                if (inputElement.TryGetProperty("throttle", out var throttleEl))
-                {
-                    var throttle = throttleEl.GetSingle();
-                    if (throttle < 0 || throttle > MAX_THROTTLE)
-                    {
-                        _logger.LogWarning("🚫 Player {SessionId} invalid throttle value: {Value}", 
-                            sessionId, throttle);
-                        return ValidationResult.Reject("Invalid throttle input");
-                    }
-                }
-                
-                // Validate brake range
-                if (inputElement.TryGetProperty("brake", out var brakeEl))
-                {
-                    var brake = brakeEl.GetSingle();
-                    if (brake < 0 || brake > MAX_BRAKE)
-                    {
-                        _logger.LogWarning("🚫 Player {SessionId} invalid brake value: {Value}", 
-                            sessionId, brake);
-                        return ValidationResult.Reject("Invalid brake input");
+                        if (vectorEl.TryGetProperty(axis, out var axisEl))
+                        {
+                            var value = axisEl.GetSingle();
+                            if (Math.Abs(value) > MAX_INPUT_AXIS)
+                            {
+                                _logger.LogWarning("🚫 Player {SessionId} invalid inputVector.{Axis}: {Value}",
+                                    sessionId, axis, value);
+                                return ValidationResult.Reject($"Invalid inputVector.{axis}");
+                            }
+                        }
                     }
                 }
                 

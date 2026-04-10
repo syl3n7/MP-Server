@@ -13,9 +13,13 @@ This guide consolidates the authentication refactor with your research requireme
 - ✅ Removed hardcoded public IP (`89.114.116.19`) → configurable via `appsettings.json` `ServerSettings:PublicIP` or `SERVER_PUBLIC_IP` env var
 - ✅ Welcome message: `CONNECTED|{id}` → `{"command":"CONNECTED","sessionId":"..."}` (plain JSON, Godot-friendly)
 - ✅ UDP shared secret: `"RacingServerUDP2024!"` hardcoded in `UdpEncryption.cs` → configurable via `appsettings.json` `SecurityConfig:UdpSharedSecret`
-- 🔜 Generic room defaults: `"Race Room"` → `"Room"` in `GameRoom.cs` and `PlayerSession.cs`
-- 🔜 Envelope-based protocol for gameplay actions (`messageId`, `timestampMs`, `sessionId` fields)
-- 🔜 Layer file moves: `PlayerSession`, `RacingServer` → `Transport/`; `GameRoom` → `Domain/`
+- ✅ Renamed `RacingServer` → `GameServer` (`RacingServer.cs` → `GameServer.cs`); all type refs in `ConsoleUI`, `PlayerSession`, `Program` updated; cert hostname default `"racing-server"` → `"mp-server"`
+- ✅ Generic room defaults: `"Race Room"` → `"Room"` in `GameRoom.cs` and `PlayerSession.cs`
+- ✅ Envelope-based protocol: `action` field routing alongside legacy `command`; `messageId` idempotency (30s window); `heartbeat` → `HEARTBEAT_ACK`; `snapshot_sync` → `SNAPSHOT`; UDP accepts `action: "move"` (payload path) and `action: "input"` alongside legacy `command: "UPDATE"` / `"INPUT"`
+- ✅ Configurable `MaxPlayers` per room: `CREATE_ROOM` now accepts optional `maxPlayers` field (default 20); `LIST_ROOMS` includes `maxPlayers` in each room entry
+- ✅ Generalized `PacketValidator` input fields: `steering`/`throttle`/`brake` → generic `inputVector` object with `x`/`y`/`z` axes each clamped to `[-1, 1]`
+- ✅ Layer file moves: `GameServer`/`PlayerSession` → `Transport/`; `GameRoom` → `Domain/`; namespaces added (`MP.Server.Transport`, `MP.Server.Domain`)
+- ✅ Fixed `UdpPort` typo in `appsettings.json` (`77788` → `7778`)
 
 ### Authentication (completed prior to April 2026)
 - ✅ DB-backed `AuthService` with BCrypt + persistent 30-day tokens
@@ -103,7 +107,7 @@ Observability/   ← Logging, metrics               (cross-cutting, used by any 
 - **Services/** — imports Data and Models. No socket or session references.
 - **Security/** — imports Models only. No DB calls in hot packet path.
 - **Protocol/** — imports Services and Models. Handles command dispatch and payload parsing.
-- **Transport/** (`RacingServer`, `PlayerSession`) — imports Protocol and Security. Drives I/O only — no business logic.
+- **Transport/** (`GameServer`, `PlayerSession`) — imports Protocol and Security. Drives I/O only — no business logic.
 - **Observability/** — cross-cutting. May be referenced by any layer.
 
 ### File Moves Required
@@ -122,7 +126,7 @@ Observability/   ← Logging, metrics               (cross-cutting, used by any 
 | `Security/RateLimiter.cs` | `Security/` | ✅ Already correct |
 | `Security/UdpEncryption.cs` | `Security/` | ✅ Already correct |
 | `PlayerSession.cs` | `Transport/` | 🔜 Future move |
-| `RacingServer.cs` | `Transport/` | 🔜 Future move |
+| `GameServer.cs` | `Transport/` | 🔜 Future move |
 | `GameRoom.cs` | `Domain/` | 🔜 Future move |
 | `ConsoleUI.cs` | `Observability/` | 🔜 Future move |
 

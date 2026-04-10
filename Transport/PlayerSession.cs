@@ -13,11 +13,14 @@ using System.Numerics;
 using MP.Server;
 using MP.Server.Security;
 using MP.Server.Services;
+using MP.Server.Domain;
+
+namespace MP.Server.Transport;
 
 public sealed class PlayerSession : IDisposable
 {
     private readonly Socket _socket;
-    private readonly RacingServer _server;
+    private readonly GameServer _server;
     private readonly AuthService? _authService;
     private readonly string _udpSharedSecret;
     private readonly Stream _stream;
@@ -35,8 +38,12 @@ public sealed class PlayerSession : IDisposable
     
     // UDP Encryption
     public UdpEncryption? UdpCrypto { get; private set; }
+
+    // Idempotency: maps messageId → receipt timestamp (ms). Prevents duplicate processing.
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, long> _recentMessageIds = new();
+    private const int MessageIdWindowMs = 30_000;
     
-    public PlayerSession(Socket socket, RacingServer server, AuthService? authService = null, bool useTls = false, X509Certificate2? certificate = null, string udpSharedSecret = "change-me-in-appsettings")
+    public PlayerSession(Socket socket, GameServer server, AuthService? authService = null, bool useTls = false, X509Certificate2? certificate = null, string udpSharedSecret = "change-me-in-appsettings")
     {
         _socket = socket;
         _server = server;
@@ -176,6 +183,37 @@ public sealed class PlayerSession : IDisposable
             
             // Parse JSON message
             var jsonMessage = JsonSerializer.Deserialize<JsonElement>(messageText);
+
+            // ─── Envelope fields (present in both formats) ───────────────────
+            string? messageId = jsonMessage.TryGetProperty("messageId", out var midEl) ? midEl.GetString() : null;
+
+            // Idempotency: drop duplicates within the 30-second window
+            if (messageId != null)
+            {
+                long nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+                if (!_recentMessageIds.TryAdd(messageId, nowMs))
+                {
+                    _server.Logger.LogDebug("⏭️ Duplicate messageId {MessageId} from {SessionId}, skipping", messageId, Id);
+                    return;
+                }
+                // Lazy cleanup of expired entries
+                foreach (var kvp in _recentMessageIds)
+                    if (nowMs - kvp.Value > MessageIdWindowMs)
+                        _recentMessageIds.TryRemove(kvp.Key, out _);
+            }
+
+            // ─── Routing: envelope (action) vs legacy (command) ──────────────
+            if (jsonMessage.TryGetProperty("action", out var actionElement))
+            {
+                if (!IsAuthenticated)
+                {
+                    await SendJsonAsync(new { command = "ERROR", message = "Authentication required.", ackFor = messageId }, ct);
+                    return;
+                }
+                await ProcessEnvelopeActionAsync(jsonMessage, actionElement.GetString(), messageId, ct);
+                return;
+            }
+
             if (!jsonMessage.TryGetProperty("command", out var commandElement))
                 return;
                 
@@ -395,17 +433,18 @@ public sealed class PlayerSession : IDisposable
                 case "CREATE_ROOM":
                     if (jsonMessage.TryGetProperty("name", out var roomNameElement))
                     {
-                        var newRoomName = roomNameElement.GetString() ?? "Race Room";
-                        var newRoom = _server.CreateRoom(newRoomName, Id);
+                        var newRoomName = roomNameElement.GetString() ?? "Room";
+                        int maxPlayers = jsonMessage.TryGetProperty("maxPlayers", out var mpEl) && mpEl.TryGetInt32(out int mp) ? mp : 20;
+                        var newRoom = _server.CreateRoom(newRoomName, Id, maxPlayers);
                         CurrentRoomId = newRoom.Id;
                         
                         // Add the player to the room they created
                         var playerInfo = new PlayerInfo(Id, PlayerName, null, new Vector3(), new Quaternion());
                         newRoom.TryAddPlayer(playerInfo);
                         
-                        _server.Logger.LogInformation("👤 Player {SessionId} ({Name}) created room '{RoomName}' ({RoomId})", 
-                            Id, PlayerName, newRoomName, newRoom.Id);
-                        await SendJsonAsync(new { command = "ROOM_CREATED", roomId = newRoom.Id, name = newRoomName }, ct);
+                        _server.Logger.LogInformation("👤 Player {SessionId} ({Name}) created room '{RoomName}' ({RoomId}) maxPlayers={MaxPlayers}", 
+                            Id, PlayerName, newRoomName, newRoom.Id, newRoom.MaxPlayers);
+                        await SendJsonAsync(new { command = "ROOM_CREATED", roomId = newRoom.Id, name = newRoomName, maxPlayers = newRoom.MaxPlayers }, ct);
                     }
                     break;
                     
@@ -417,7 +456,8 @@ public sealed class PlayerSession : IDisposable
                     var rooms = _server.GetAllRooms().Select(r => new { 
                         id = r.Id, 
                         name = r.Name, 
-                        playerCount = r.PlayerCount, 
+                        playerCount = r.PlayerCount,
+                        maxPlayers = r.MaxPlayers,
                         isActive = r.IsActive,
                         hostId = r.HostId
                     });
@@ -591,6 +631,40 @@ public sealed class PlayerSession : IDisposable
         catch (Exception ex)
         {
             _server.Logger.LogError(ex, "❌ Error processing message for session {SessionId}", Id);
+        }
+    }
+
+    //? Envelope-based action handler (Godot-compatible protocol)
+    // Called when the incoming message has an "action" field instead of "command".
+    private async Task ProcessEnvelopeActionAsync(JsonElement envelope, string? action, string? messageId, CancellationToken ct)
+    {
+        switch (action?.ToLower())
+        {
+            case "heartbeat":
+                await SendJsonAsync(new
+                {
+                    command = "HEARTBEAT_ACK",
+                    ackFor = messageId,
+                    serverTimestampMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+                    sessionId = Id
+                }, ct);
+                break;
+
+            case "snapshot_sync":
+                if (string.IsNullOrEmpty(CurrentRoomId))
+                {
+                    await SendJsonAsync(new { command = "SNAPSHOT", ackFor = messageId, players = Array.Empty<object>() }, ct);
+                    break;
+                }
+                var room = _server.GetAllRooms().FirstOrDefault(r => r.Id == CurrentRoomId);
+                var snapshot = room?.Players.Select(p => new { id = p.Id, name = p.Name }) ?? Enumerable.Empty<object>();
+                await SendJsonAsync(new { command = "SNAPSHOT", ackFor = messageId, roomId = CurrentRoomId, players = snapshot }, ct);
+                break;
+
+            default:
+                _server.Logger.LogWarning("⚠️ Unknown envelope action '{Action}' from {SessionId}", action, Id);
+                await SendJsonAsync(new { command = "UNKNOWN_ACTION", action, ackFor = messageId }, ct);
+                break;
         }
     }
 

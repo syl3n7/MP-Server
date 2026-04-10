@@ -21,7 +21,7 @@ namespace MP.Server.Models
         
         [Required]
         [StringLength(100)]
-        public string Category { get; set; } = string.Empty; // RacingServer, PlayerSession, Security, etc.
+        public string Category { get; set; } = string.Empty; // GameServer, PlayerSession, Security, etc.
         
         [Required]
         [StringLength(1000)]

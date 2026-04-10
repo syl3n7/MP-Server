@@ -9,6 +9,7 @@ using MP.Server.Data;
 using MP.Server.Services;
 using MP.Server.Logging;
 using MP.Server.Security;
+using MP.Server.Transport;
 
 Console.WriteLine("🏁 MP-Server Console Edition");
 Console.WriteLine("============================");
@@ -60,28 +61,32 @@ try
         Console.WriteLine("✅ Database initialized");
     }
     
-    // Create and start the racing server
+    // Create and start the game server
     using var serverScope = host.Services.CreateScope();
-    var logger = serverScope.ServiceProvider.GetRequiredService<ILogger<RacingServer>>();
+    var logger = serverScope.ServiceProvider.GetRequiredService<ILogger<GameServer>>();
     var dbLoggingService = serverScope.ServiceProvider.GetRequiredService<DatabaseLoggingService>();
     var authService = host.Services.GetRequiredService<AuthService>();
     
-    // Server configuration
-    const int tcpPort = 443;
-    const int udpPort = 443;
-    const bool useTls = true;
-    
-    // Read public IP from config (ServerSettings:PublicIP) with env-var fallback
+    // Server configuration — read from appsettings.json ServerSettings
     var config = host.Services.GetRequiredService<Microsoft.Extensions.Configuration.IConfiguration>();
+    int tcpPort = int.TryParse(config["ServerSettings:TcpPort"], out int tp) ? tp : 7777;
+    int udpPort = int.TryParse(config["ServerSettings:UdpPort"], out int up) ? up : 7778;
+    bool useTls = !bool.TryParse(config["ServerSettings:UseTls"], out bool tls) || tls;
+
+    // Read public IP from config (ServerSettings:PublicIP) with env-var fallback
     var publicIp = config["ServerSettings:PublicIP"]
         ?? Environment.GetEnvironmentVariable("SERVER_PUBLIC_IP")
         ?? "0.0.0.0";
+    var hostname = config["ServerSettings:Hostname"]
+        ?? Environment.GetEnvironmentVariable("SERVER_HOSTNAME")
+        ?? "mp-server";
     
-    Console.WriteLine($"\ud83d\ude80 Starting Racing Server...");
+    Console.WriteLine($"\ud83d\ude80 Starting Game Server...");
     Console.WriteLine($"   TCP Port: {tcpPort}");
     Console.WriteLine($"   UDP Port: {udpPort}");
     Console.WriteLine($"   TLS: {(useTls ? "Enabled" : "Disabled")}");
     Console.WriteLine($"   Public IP: {publicIp}");
+    Console.WriteLine($"   Hostname: {hostname}");
     
     // Build SecurityConfig, pulling the UDP secret from appsettings.json
     var securityConfig = new MP.Server.Security.SecurityConfig
@@ -89,11 +94,11 @@ try
         UdpSharedSecret = config["SecurityConfig:UdpSharedSecret"] ?? "change-me-before-deploying"
     };
     
-    var server = new RacingServer(tcpPort, udpPort, logger, useTls, null, securityConfig, dbLoggingService, authService, publicIp);
+    var server = new GameServer(tcpPort, udpPort, logger, useTls, null, securityConfig, dbLoggingService, authService, publicIp, hostname);
     
     // Start server
     await server.StartAsync(serverCts.Token);
-    Console.WriteLine("✅ Racing server started successfully!");
+    Console.WriteLine("✅ Game server started successfully!");
     
     // Start console UI
     var consoleUI = new ConsoleUI(server, serverCts);

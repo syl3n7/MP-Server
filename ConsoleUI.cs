@@ -6,13 +6,14 @@ using System.Linq;
 using Microsoft.Extensions.Logging;
 using MP.Server.Testing;
 using MP.Server.Diagnostics;
+using MP.Server.Transport;
 
 public class ConsoleUI
 {
-    private readonly RacingServer _server;
+    private readonly GameServer _server;
     private readonly CancellationTokenSource _serverCts;
 
-    public ConsoleUI(RacingServer server, CancellationTokenSource serverCts)
+    public ConsoleUI(GameServer server, CancellationTokenSource serverCts)
     {
         _server = server;
         _serverCts = serverCts;
@@ -348,9 +349,9 @@ public class ConsoleUI
             var sessionToKick = sessions[sessionIndex - 1];
             Console.WriteLine($"Kicking player: {sessionToKick.PlayerName}");
             
-            // Note: This would need to be implemented in RacingServer
+            // Note: This would need to be implemented in GameServer
             // _server.KickPlayer(sessionToKick.Id);
-            Console.WriteLine("Note: Kick functionality needs to be implemented in RacingServer class.");
+            Console.WriteLine("Note: Kick functionality needs to be implemented in GameServer class.");
         }
         else
         {

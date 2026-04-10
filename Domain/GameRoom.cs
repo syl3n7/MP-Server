@@ -6,10 +6,12 @@ using MP.Server;
 using MP.Server.Services;
 using Microsoft.Extensions.Logging;
 
+namespace MP.Server.Domain;
+
 public sealed class GameRoom
 {
     public string Id { get; } = Guid.NewGuid().ToString("N");
-    public string Name { get; set; } = "Race Room";
+    public string Name { get; set; } = "Room";
     public string? HostId { get; set; }
     public int MaxPlayers { get; set; } = 20;
     public bool IsActive { get; set; }
