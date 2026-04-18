@@ -11,6 +11,7 @@ using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 using System.Numerics;
 using MP.Server;
+using MP.Server.Inventory;
 using MP.Server.Security;
 using MP.Server.Services;
 using MP.Server.Domain;
@@ -252,6 +253,7 @@ public sealed class PlayerSession : IDisposable
                             UdpCrypto             = new UdpEncryption(Id, _udpSharedSecret);
                             _server.Logger.LogInformation("✅ REGISTER → {Username} (Id={UserId}) session={SessionId}", result.Username, result.UserId, Id);
                             await SendJsonAsync(new { command = "REGISTER_OK", userId = result.UserId, username = result.Username, token = result.Token }, ct);
+                            await InventoryManager.Instance.OnPlayerJoined(Id, ct);
                         }
                         else
                         {
@@ -282,6 +284,7 @@ public sealed class PlayerSession : IDisposable
                             UdpCrypto             = new UdpEncryption(Id, _udpSharedSecret);
                             _server.Logger.LogInformation("🔐 LOGIN → {Username} (Id={UserId}) session={SessionId}", result.Username, result.UserId, Id);
                             await SendJsonAsync(new { command = "LOGIN_OK", userId = result.UserId, username = result.Username, token = result.Token }, ct);
+                            await InventoryManager.Instance.OnPlayerJoined(Id, ct);
                         }
                         else
                         {
@@ -311,6 +314,7 @@ public sealed class PlayerSession : IDisposable
                             UdpCrypto             = new UdpEncryption(Id, _udpSharedSecret);
                             _server.Logger.LogInformation("🔑 AUTO_AUTH → {Username} (Id={UserId}) session={SessionId}", result.Username, result.UserId, Id);
                             await SendJsonAsync(new { command = "AUTO_AUTH_OK", userId = result.UserId, username = result.Username }, ct);
+                            await InventoryManager.Instance.OnPlayerJoined(Id, ct);
                         }
                         else
                         {
@@ -615,6 +619,52 @@ public sealed class PlayerSession : IDisposable
                     {
                         await SendJsonAsync(new { command = "ERROR", message = "Message content is required." }, ct);
                     }
+                    break;
+
+                case "INV_MOVE_SLOT":
+                    {
+                        if (!jsonMessage.TryGetProperty("fromSlot", out var fromSlotEl) || !fromSlotEl.TryGetInt32(out int fromSlot) ||
+                            !jsonMessage.TryGetProperty("toSlot",   out var toSlotEl)   || !toSlotEl.TryGetInt32(out int toSlot))
+                        {
+                            await SendJsonAsync(new { command = "ERROR", message = "fromSlot and toSlot (int) are required." }, ct);
+                            break;
+                        }
+                        await InventoryManager.Instance.HandleMoveSlot(Id, fromSlot, toSlot, ct);
+                    }
+                    break;
+
+                case "INV_DROP_ITEM":
+                    {
+                        if (!jsonMessage.TryGetProperty("slotId", out var dropSlotEl) || !dropSlotEl.TryGetInt32(out int dropSlot))
+                        {
+                            await SendJsonAsync(new { command = "ERROR", message = "slotId (int) is required." }, ct);
+                            break;
+                        }
+                        int dropQty = jsonMessage.TryGetProperty("quantity", out var qtyEl) && qtyEl.TryGetInt32(out int q) ? q : 1;
+                        if (string.IsNullOrEmpty(CurrentRoomId))
+                        {
+                            await SendJsonAsync(new { command = "ERROR", message = "Must be in a room to drop items." }, ct);
+                            break;
+                        }
+                        var dropRoom   = _server.GetAllRooms().FirstOrDefault(r => r.Id == CurrentRoomId);
+                        var playerPos  = dropRoom?.Players.FirstOrDefault(p => p.Id == Id)?.Position ?? Vector3.Zero;
+                        await InventoryManager.Instance.HandleDropItem(Id, CurrentRoomId, dropSlot, dropQty, playerPos, ct);
+                    }
+                    break;
+
+                case "INV_USE_ITEM":
+                    {
+                        if (!jsonMessage.TryGetProperty("slotId", out var useSlotEl) || !useSlotEl.TryGetInt32(out int useSlot))
+                        {
+                            await SendJsonAsync(new { command = "ERROR", message = "slotId (int) is required." }, ct);
+                            break;
+                        }
+                        await InventoryManager.Instance.HandleUseItem(Id, useSlot, ct);
+                    }
+                    break;
+
+                case "INV_REQUEST_SYNC":
+                    await InventoryManager.Instance.HandleSyncRequest(Id, ct);
                     break;
 
                 default:

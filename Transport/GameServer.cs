@@ -17,6 +17,7 @@ using System.Linq;
 using System.IO;
 using MP.Server;
 using MP.Server.Diagnostics;
+using MP.Server.Inventory;
 using MP.Server.Security;
 using MP.Server.Services;
 using MP.Server.Domain;
@@ -157,7 +158,12 @@ public sealed class GameServer : IHostedService, IDisposable
         
         // Maintenance tasks
         _heartbeatTask = Task.Run(() => HeartbeatMonitorAsync(_cts.Token));
-        
+
+        // Inventory system
+        var itemsPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Resources", "items.json");
+        ItemRegistry.Instance.LoadFromJson(itemsPath, _logger);
+        InventoryManager.Instance.Initialise(new GameServerAdapter(this), _logger);
+
         _logger.LogInformation("✅ Server started on TCP:{TcpPort} UDP:{UdpPort}", _tcpPort, _udpPort);
         _logger.LogInformation("🔗 Server binding: 0.0.0.0:{Port} ({Security})", _tcpPort, _useTls ? "TLS/SSL" : "Plain");
         _logger.LogInformation("📡 Clients should connect to: {PublicIP}:{Port}", _publicIp, _tcpPort);
@@ -316,6 +322,7 @@ public sealed class GameServer : IHostedService, IDisposable
             }
             finally
             {
+                InventoryManager.Instance.OnPlayerLeft(session.Id);
                 _sessions.TryRemove(session.Id, out _);
                 _securityManager.RemoveClient(session.Id);
                 await session.DisconnectAsync().ConfigureAwait(false);

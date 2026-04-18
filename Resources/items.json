@@ -1,0 +1,29 @@
+[
+  {
+    "itemId": "wood_plank",
+    "displayName": "Wood Plank",
+    "maxStack": 64,
+    "weight": 2.0,
+    "isDroppable": true,
+    "isUsable": false,
+    "tags": {}
+  },
+  {
+    "itemId": "health_potion",
+    "displayName": "Health Potion",
+    "maxStack": 10,
+    "weight": 0.5,
+    "isDroppable": true,
+    "isUsable": true,
+    "tags": { "heal": 50 }
+  },
+  {
+    "itemId": "iron_sword",
+    "displayName": "Iron Sword",
+    "maxStack": 1,
+    "weight": 5.0,
+    "isDroppable": true,
+    "isUsable": false,
+    "tags": { "damage": 15 }
+  }
+]
