@@ -18,7 +18,7 @@ using MP.Server.Domain;
 
 namespace MP.Server.Transport;
 
-public sealed class PlayerSession : IDisposable
+public sealed class PlayerSession : IDisposable, IPlayerSession
 {
     private readonly Socket _socket;
     private readonly GameServer _server;

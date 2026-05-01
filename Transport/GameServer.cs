@@ -24,7 +24,7 @@ using MP.Server.Domain;
 
 namespace MP.Server.Transport;
 
-public sealed class GameServer : IHostedService, IDisposable
+public sealed class GameServer : IHostedService, IDisposable, ITransportServer
 {
     private readonly int _tcpPort;
     private readonly int _udpPort;
