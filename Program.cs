@@ -2,6 +2,8 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Hosting;
 using MP.Server.Data;
 using MP.Server.Observability;
+using MP.Server.Protocol;
+using MP.Server.Protocol.Handlers;
 using MP.Server.Security;
 using MP.Server.Services;
 using MP.Server.Transport;
@@ -27,13 +29,22 @@ builder.Services.AddSingleton<DatabaseLoggingService>();
 builder.Services.AddSingleton<AuthService>();
 builder.Services.AddHostedService<LogCleanupService>();
 
+// ── Protocol handlers ─────────────────────────────────────────────────────────
+builder.Services.AddSingleton<ICommandHandler, AuthHandler>();
+builder.Services.AddSingleton<ICommandHandler, RoomHandler>();
+builder.Services.AddSingleton<ICommandHandler, ChatHandler>();
+builder.Services.AddSingleton<ICommandHandler, InventoryHandler>();
+builder.Services.AddSingleton<ICommandHandler, SystemHandler>();
+builder.Services.AddSingleton<ICommandHandler, EnvelopeHandler>();
+builder.Services.AddSingleton<CommandRouter>();
+
 // ── Game server ───────────────────────────────────────────────────────────────
 builder.Services.AddSingleton<GameServer>(sp =>
 {
     var cfg    = sp.GetRequiredService<IConfiguration>();
     var logger = sp.GetRequiredService<ILogger<GameServer>>();
     var dbLog  = sp.GetRequiredService<DatabaseLoggingService>();
-    var auth   = sp.GetRequiredService<AuthService>();
+    var router = sp.GetRequiredService<CommandRouter>();
 
     int    tcpPort  = cfg.GetValue<int>("ServerSettings:TcpPort", 7777);
     int    udpPort  = cfg.GetValue<int>("ServerSettings:UdpPort", 7778);
@@ -50,7 +61,7 @@ builder.Services.AddSingleton<GameServer>(sp =>
         UdpSharedSecret = cfg["SecurityConfig:UdpSharedSecret"] ?? "change-me-before-deploying"
     };
 
-    return new GameServer(tcpPort, udpPort, logger, useTls, null, secCfg, dbLog, auth, publicIp, hostname);
+    return new GameServer(tcpPort, udpPort, logger, router, useTls, null, secCfg, dbLog, publicIp, hostname);
 });
 
 // Register GameServer as IHostedService so the host starts/stops it automatically.

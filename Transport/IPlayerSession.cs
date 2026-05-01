@@ -29,6 +29,14 @@ public interface IPlayerSession
     // ── UDP encryption ────────────────────────────────────────────────────────
     UdpEncryption? UdpCrypto { get; }
 
+    // ── Network info ──────────────────────────────────────────────────────────
+    /// <summary>Remote IP string, or null if unavailable. Used by auth handlers.</summary>
+    string? RemoteIpAddress { get; }
+
+    // ── Auth helper ───────────────────────────────────────────────────────────
+    /// <summary>Set auth state and initialise UDP crypto. Called by AuthHandler on success.</summary>
+    void Authenticate(int? userId, string username);
+
     // ── Messaging ─────────────────────────────────────────────────────────────
     Task SendJsonAsync<T>(T message, CancellationToken ct = default);
     Task DisconnectAsync();

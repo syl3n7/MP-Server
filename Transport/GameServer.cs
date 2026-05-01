@@ -18,6 +18,7 @@ using System.IO;
 using MP.Server;
 using MP.Server.Diagnostics;
 using MP.Server.Inventory;
+using MP.Server.Protocol;
 using MP.Server.Security;
 using MP.Server.Services;
 using MP.Server.Domain;
@@ -43,8 +44,8 @@ public sealed class GameServer : IHostedService, IDisposable, ITransportServer
     private readonly ConcurrentDictionary<string, PlayerSession> _sessions = new();
     private readonly ConcurrentDictionary<string, GameRoom> _rooms = new();
     
-    // DB-backed authentication service
-    private readonly AuthService? _authService;
+    // Protocol command router
+    private readonly CommandRouter _router;
     
     // TLS/SSL Configuration
     private readonly bool _useTls;
@@ -75,9 +76,9 @@ public sealed class GameServer : IHostedService, IDisposable, ITransportServer
     public SecurityManager SecurityManager => _securityManager;
     public DatabaseLoggingService? DatabaseLoggingService => _dbLoggingService;
     
-    public GameServer(int tcpPort, int udpPort, ILogger<GameServer>? logger = null, bool useTls = true, X509Certificate2? certificate = null, SecurityConfig? securityConfig = null, DatabaseLoggingService? dbLoggingService = null, AuthService? authService = null, string? publicIp = null, string? hostname = null)
+    public GameServer(int tcpPort, int udpPort, ILogger<GameServer>? logger = null, CommandRouter? router = null, bool useTls = true, X509Certificate2? certificate = null, SecurityConfig? securityConfig = null, DatabaseLoggingService? dbLoggingService = null, string? publicIp = null, string? hostname = null)
     {
-        _authService = authService;
+        _router = router ?? throw new ArgumentNullException(nameof(router));
         _tcpPort = tcpPort;
         _udpPort = udpPort;
         _logger = logger ?? LoggerFactory.Create(b => b.AddConsole()).CreateLogger<GameServer>();
@@ -267,7 +268,7 @@ public sealed class GameServer : IHostedService, IDisposable, ITransportServer
         var endpoint = socket.RemoteEndPoint as IPEndPoint;
         
         using (socket)
-        using (var session = new PlayerSession(socket, this, _authService, _useTls, _serverCertificate, _securityConfig.UdpSharedSecret))
+        using (var session = new PlayerSession(socket, this, _router, _useTls, _serverCertificate, _securityConfig.UdpSharedSecret))
         {
             try
             {
@@ -856,15 +857,15 @@ public sealed class GameServer : IHostedService, IDisposable, ITransportServer
         return _rooms.Values.ToList().AsReadOnly();
     }
 
-    public PlayerSession? GetPlayerSession(string sessionId)
+    public IPlayerSession? GetPlayerSession(string sessionId)
     {
         _sessions.TryGetValue(sessionId, out var session);
         return session;
     }
 
-    public IReadOnlyCollection<PlayerSession> GetAllSessions()
+    public IReadOnlyCollection<IPlayerSession> GetAllSessions()
     {
-        return _sessions.Values.ToList().AsReadOnly();
+        return _sessions.Values.Cast<IPlayerSession>().ToList().AsReadOnly();
     }
 
     public async Task BroadcastToRoomAsync<T>(string roomId, T message, CancellationToken ct = default)

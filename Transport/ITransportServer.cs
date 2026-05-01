@@ -12,8 +12,8 @@ namespace MP.Server.Transport;
 public interface ITransportServer
 {
     // ── Session access ────────────────────────────────────────────────────────
-    PlayerSession? GetPlayerSession(string sessionId);
-    IReadOnlyCollection<PlayerSession> GetAllSessions();
+    IPlayerSession? GetPlayerSession(string sessionId);
+    IReadOnlyCollection<IPlayerSession> GetAllSessions();
 
     // ── Room management ───────────────────────────────────────────────────────
     GameRoom CreateRoom(string name, string hostId, int maxPlayers = 20);
