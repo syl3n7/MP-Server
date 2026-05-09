@@ -6,6 +6,7 @@ using MP.Server.Protocol;
 using MP.Server.Protocol.Handlers;
 using MP.Server.Security;
 using MP.Server.Services;
+using MP.Server.Testing;
 using MP.Server.Transport;
 using Serilog;
 
@@ -81,6 +82,9 @@ builder.Services.AddHostedService(sp => sp.GetRequiredService<GameServer>());
 
 // Console UI runs as a background service alongside the web host.
 builder.Services.AddHostedService<ConsoleUiService>();
+
+// ── Load test bots (disabled by default — enable via LoadTest:Enabled in appsettings) ───
+builder.Services.AddHostedService<BotRunnerService>();
 
 // ── Dashboard HTTP port ───────────────────────────────────────────────────────
 int dashPort = builder.Configuration.GetValue<int>("DashboardSettings:Port", 8080);
