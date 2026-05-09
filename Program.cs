@@ -7,11 +7,23 @@ using MP.Server.Protocol.Handlers;
 using MP.Server.Security;
 using MP.Server.Services;
 using MP.Server.Transport;
+using Serilog;
+
+// Bootstrap logger captures startup errors before full config is loaded.
+Log.Logger = new LoggerConfiguration()
+    .WriteTo.Console(outputTemplate: "[{Timestamp:HH:mm:ss} {Level:u3}] {Message:lj}{NewLine}{Exception}")
+    .CreateBootstrapLogger();
 
 Console.WriteLine("🏁 MP-Server");
 Console.WriteLine("============");
 
 var builder = WebApplication.CreateBuilder(args);
+
+// ── Serilog ───────────────────────────────────────────────────────────────────
+builder.Host.UseSerilog((ctx, services, cfg) => cfg
+    .ReadFrom.Configuration(ctx.Configuration)
+    .ReadFrom.Services(services)
+    .Enrich.FromLogContext());
 
 // ── Web / MVC ─────────────────────────────────────────────────────────────────
 builder.Services.AddControllersWithViews();

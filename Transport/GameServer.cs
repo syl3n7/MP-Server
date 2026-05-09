@@ -811,9 +811,13 @@ public sealed class GameServer : IHostedService, IDisposable, ITransportServer
                         inactiveSessions++;
                     }
                 }
-                
-                _logger.LogInformation("💓 Heartbeat: {ActiveSessions} active sessions, {InactiveSessions} removed",
-                    _sessions.Count, inactiveSessions);
+
+                var authenticatedSessions = _sessions.Values.Count(s => s.IsAuthenticated);
+                var activeRooms           = _rooms.Values.Count(r => r.IsActive);
+
+                _logger.LogInformation(
+                    "💓 Heartbeat: {ActiveSessions} sessions ({AuthenticatedSessions} authed), {ActiveRooms} active rooms, {InactiveSessions} removed",
+                    _sessions.Count, authenticatedSessions, activeRooms, inactiveSessions);
             }
             catch (OperationCanceledException)
             {

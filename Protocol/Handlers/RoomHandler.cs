@@ -3,6 +3,7 @@ using System.Linq;
 using System.Numerics;
 using System.Threading;
 using System.Threading.Tasks;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using MP.Server.Domain;
 using MP.Server.Transport;
@@ -12,11 +13,20 @@ namespace MP.Server.Protocol.Handlers;
 public sealed class RoomHandler : ICommandHandler
 {
     private readonly ILogger<RoomHandler> _logger;
+    private readonly string _autoJoinToken;
+    private readonly string _autoJoinRoomName;
+    private readonly int    _autoJoinMaxPlayers;
 
     public IReadOnlyList<string> Handles { get; } =
-        ["CREATE_ROOM", "JOIN_ROOM", "LEAVE_ROOM", "LIST_ROOMS", "GET_ROOM_PLAYERS", "START_GAME"];
+        ["CREATE_ROOM", "JOIN_ROOM", "LEAVE_ROOM", "LIST_ROOMS", "GET_ROOM_PLAYERS", "START_GAME", "AUTO_JOIN"];
 
-    public RoomHandler(ILogger<RoomHandler> logger) => _logger = logger;
+    public RoomHandler(ILogger<RoomHandler> logger, IConfiguration cfg)
+    {
+        _logger             = logger;
+        _autoJoinToken      = cfg["ServerSettings:AutoJoinToken"]      ?? "";
+        _autoJoinRoomName   = cfg["ServerSettings:AutoJoinRoomName"]   ?? "Auto";
+        _autoJoinMaxPlayers = cfg.GetValue<int>("ServerSettings:AutoJoinMaxPlayers", 20);
+    }
 
     public Task HandleAsync(MessageEnvelope envelope, IPlayerSession session, ITransportServer transport, CancellationToken ct)
         => envelope.Command switch
@@ -27,6 +37,7 @@ public sealed class RoomHandler : ICommandHandler
             "LIST_ROOMS"       => HandleListRooms(session, transport, ct),
             "GET_ROOM_PLAYERS" => HandleGetRoomPlayers(session, transport, ct),
             "START_GAME"       => HandleStartGame(session, transport, ct),
+            "AUTO_JOIN"        => HandleAutoJoin(envelope, session, transport, ct),
             _                  => Task.CompletedTask
         };
 
@@ -178,5 +189,55 @@ public sealed class RoomHandler : ICommandHandler
         await transport.BroadcastToRoomAsync(session.CurrentRoomId, msg, ct);
         // Host also gets a direct send (matches original behaviour)
         await session.SendJsonAsync(msg, ct);
+    }
+
+    // ── AUTO_JOIN ──────────────────────────────────────────────────────────────
+    // Clients (real or bots) send:
+    //   {"command":"AUTO_JOIN","token":"test-lab"}
+    // The server finds or creates the designated auto room and places the player in it.
+    // Token must match ServerSettings:AutoJoinToken in appsettings.json.
+    // Set AutoJoinToken to "" (empty) to disable the feature entirely.
+    private async Task HandleAutoJoin(MessageEnvelope e, IPlayerSession session, ITransportServer transport, CancellationToken ct)
+    {
+        if (string.IsNullOrEmpty(_autoJoinToken))
+        {
+            await session.SendJsonAsync(new { command = "ERROR", message = "AUTO_JOIN is disabled on this server." }, ct);
+            return;
+        }
+
+        var token = e.Raw.TryGetProperty("token", out var t) ? t.GetString() ?? "" : "";
+        if (token != _autoJoinToken)
+        {
+            _logger.LogWarning("🚫 AUTO_JOIN rejected for {SessionId} — wrong token", session.Id);
+            await session.SendJsonAsync(new { command = "ERROR", message = "Invalid AUTO_JOIN token." }, ct);
+            return;
+        }
+
+        // Already in a room — idempotent, just confirm.
+        if (!string.IsNullOrEmpty(session.CurrentRoomId))
+        {
+            await session.SendJsonAsync(new { command = "JOIN_OK", roomId = session.CurrentRoomId, autoJoined = true }, ct);
+            return;
+        }
+
+        // Find the designated auto room (first non-active, non-full room with the configured name).
+        var room = transport.GetAllRooms()
+            .FirstOrDefault(r => r.Name == _autoJoinRoomName && !r.IsActive && r.PlayerCount < r.MaxPlayers);
+
+        if (room == null)
+        {
+            // None exists yet — create it. The first player becomes host.
+            room = transport.CreateRoom(_autoJoinRoomName, session.Id, _autoJoinMaxPlayers);
+            _logger.LogInformation("🏁 AUTO_JOIN created room '{RoomName}' ({RoomId}) for {SessionId}",
+                _autoJoinRoomName, room.Id, session.Id);
+        }
+
+        room.TryAddPlayer(new PlayerInfo(session.Id, session.PlayerName, null, Vector3.Zero, Quaternion.Identity));
+        session.CurrentRoomId = room.Id;
+
+        _logger.LogInformation("🤖 AUTO_JOIN: {SessionId} ({Name}) → room '{RoomName}' ({RoomId}) [{Count}/{Max}]",
+            session.Id, session.PlayerName, room.Name, room.Id, room.PlayerCount, room.MaxPlayers);
+
+        await session.SendJsonAsync(new { command = "JOIN_OK", roomId = room.Id, autoJoined = true }, ct);
     }
 }
