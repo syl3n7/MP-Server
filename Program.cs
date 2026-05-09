@@ -98,8 +98,8 @@ using (var scope = app.Services.CreateScope())
 {
     var dbFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<UserDbContext>>();
     await using var ctx = await dbFactory.CreateDbContextAsync();
-    await ctx.Database.EnsureCreatedAsync();
-    Console.WriteLine("✅ Database initialised");
+    await ctx.Database.MigrateAsync();
+    Console.WriteLine("✅ Database migrated");
 }
 
 Console.WriteLine($"🌐 Dashboard → http://0.0.0.0:{dashPort}");
