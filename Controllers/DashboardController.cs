@@ -1,7 +1,7 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using MP.Server.Data;
-using MP.Server.Models;
+using MP.Server.Models.Dtos;
 using MP.Server.Transport;
 
 namespace MP.Server.Controllers;
@@ -35,11 +35,11 @@ public class DashboardViewModel
     public int SecurityEventsToday     { get; set; }
     public int UnresolvedSecurityEvents { get; set; }
     public int CriticalSecurityEvents  { get; set; }
-    public List<SecurityLog> RecentSecurityEvents { get; set; } = new();
+    public List<SecurityLogDto> RecentSecurityEvents { get; set; } = new();
 
     // Logs
-    public List<ServerLog>     RecentServerLogs  { get; set; } = new();
-    public List<ConnectionLog> RecentConnections { get; set; } = new();
+    public List<ServerLogDto>     RecentServerLogs  { get; set; } = new();
+    public List<ConnectionLogDto> RecentConnections { get; set; } = new();
 
     // 24 h connection stats
     public int ConnectionsLast24h    { get; set; }
@@ -153,14 +153,18 @@ public class DashboardController : Controller
             model.SecurityEventsToday      = await db.SecurityLogs.CountAsync(l => l.Timestamp >= today);
             model.UnresolvedSecurityEvents = await db.SecurityLogs.CountAsync(l => !l.IsResolved);
             model.CriticalSecurityEvents   = await db.SecurityLogs.CountAsync(l => l.Severity >= 3 && !l.IsResolved);
-            model.RecentSecurityEvents     = await db.SecurityLogs
-                .OrderByDescending(l => l.Timestamp).Take(10).ToListAsync();
+            model.RecentSecurityEvents = await db.SecurityLogs
+                .OrderByDescending(l => l.Timestamp).Take(10)
+                .Select(l => new SecurityLogDto(l.Timestamp, l.EventType, l.IpAddress, l.Severity, l.IsResolved))
+                .ToListAsync();
 
             // Logs
             model.ErrorLogsToday   = await db.ServerLogs.CountAsync(l => l.Timestamp >= today && l.Level == "Error");
             model.WarningLogsToday = await db.ServerLogs.CountAsync(l => l.Timestamp >= today && l.Level == "Warning");
             model.RecentServerLogs = await db.ServerLogs
-                .OrderByDescending(l => l.Timestamp).Take(20).ToListAsync();
+                .OrderByDescending(l => l.Timestamp).Take(20)
+                .Select(l => new ServerLogDto(l.Timestamp, l.Level, l.Category, l.Message))
+                .ToListAsync();
 
             // Connections
             model.ConnectionsLast24h    = await db.ConnectionLogs
@@ -170,7 +174,9 @@ public class DashboardController : Controller
             model.DisconnectionsLast24h = await db.ConnectionLogs
                 .CountAsync(l => l.Timestamp >= since24h && l.EventType == "Disconnect");
             model.RecentConnections = await db.ConnectionLogs
-                .OrderByDescending(l => l.Timestamp).Take(15).ToListAsync();
+                .OrderByDescending(l => l.Timestamp).Take(15)
+                .Select(l => new ConnectionLogDto(l.Timestamp, l.EventType, l.IpAddress, l.PlayerName, l.UsedTls))
+                .ToListAsync();
         }
         catch
         {
