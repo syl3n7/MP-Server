@@ -24,4 +24,7 @@ public interface ITransportServer
     // ── Broadcast ─────────────────────────────────────────────────────────────
     Task BroadcastToRoomAsync<T>(string roomId, T message, CancellationToken ct = default);
     Task BroadcastChatMessageAsync(string roomId, string senderName, string message, string senderId);
+
+    /// <summary>Send an encrypted (or plain) UDP datagram to every player in a room except the sender.</summary>
+    Task BroadcastUdpToRoomAsync(string roomId, object message, string excludeSessionId, CancellationToken ct = default);
 }

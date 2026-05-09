@@ -14,7 +14,6 @@ using MP.Server;
 using MP.Server.Inventory;
 using MP.Server.Protocol;
 using MP.Server.Security;
-using MP.Server.Domain;
 
 namespace MP.Server.Transport;
 
@@ -39,6 +38,9 @@ public sealed class PlayerSession : IDisposable, IPlayerSession
     
     // UDP Encryption
     public UdpEncryption? UdpCrypto { get; private set; }
+
+    // UDP remote endpoint — set by GameServer each time it receives a UDP packet from this session
+    public System.Net.IPEndPoint? UdpEndpoint { get; set; }
 
     // IPlayerSession members added by protocol layer
     public string? RemoteIpAddress => (_socket.RemoteEndPoint as System.Net.IPEndPoint)?.Address?.ToString();
@@ -214,20 +216,6 @@ public sealed class PlayerSession : IDisposable, IPlayerSession
                         _recentMessageIds.TryRemove(kvp.Key, out _);
             }
 
-            // Auth gating for envelope actions
-            if (envelope.Action != null && !IsAuthenticated)
-            {
-                await SendJsonAsync(new { command = "ERROR", message = "Authentication required.", ackFor = envelope.MessageId }, ct);
-                return;
-            }
-
-            // Auth gating for legacy commands
-            if (envelope.Command != null && RequiresAuthentication(envelope.Command) && !IsAuthenticated)
-            {
-                await SendJsonAsync(new { command = "ERROR", message = "Authentication required. Use REGISTER, LOGIN, or AUTO_AUTH first." }, ct);
-                return;
-            }
-
             await _router.RouteAsync(envelope, this, _server, ct);
         }
         catch (JsonException ex)
@@ -239,15 +227,6 @@ public sealed class PlayerSession : IDisposable, IPlayerSession
         {
             _server.Logger.LogError(ex, "❌ Error processing message for session {SessionId}", Id);
         }
-    }
-
-    private bool RequiresAuthentication(string command)
-    {
-        return command switch
-        {
-            "REGISTER" or "LOGIN" or "AUTO_AUTH" or "PING" or "BYE" or "PLAYER_INFO" or "LIST_ROOMS" => false,
-            _ => true
-        };
     }
 
     public async ValueTask SendAsync(ReadOnlyMemory<byte> data, CancellationToken ct = default)

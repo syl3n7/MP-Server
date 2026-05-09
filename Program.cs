@@ -49,6 +49,7 @@ builder.Services.AddSingleton<ICommandHandler, ChatHandler>();
 builder.Services.AddSingleton<ICommandHandler, InventoryHandler>();
 builder.Services.AddSingleton<ICommandHandler, SystemHandler>();
 builder.Services.AddSingleton<ICommandHandler, EnvelopeHandler>();
+builder.Services.AddSingleton<ICommandHandler, UdpMovementHandler>();
 builder.Services.AddSingleton<CommandRouter>();
 
 // ── Game server ───────────────────────────────────────────────────────────────

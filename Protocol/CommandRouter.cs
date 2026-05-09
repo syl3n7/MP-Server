@@ -11,6 +11,12 @@ public sealed class CommandRouter
 {
     private readonly Dictionary<string, ICommandHandler> _map;
 
+    // Commands that may be processed before the session is authenticated
+    private static readonly HashSet<string> _noAuthRequired = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "REGISTER", "LOGIN", "AUTO_AUTH", "PING", "BYE", "PLAYER_INFO", "LIST_ROOMS"
+    };
+
     public CommandRouter(IEnumerable<ICommandHandler> handlers)
     {
         _map = handlers
@@ -22,6 +28,14 @@ public sealed class CommandRouter
     {
         var key = envelope.Action ?? envelope.Command;
         if (string.IsNullOrEmpty(key)) return Task.CompletedTask;
+
+        // All envelope actions require auth; for legacy commands only a few are exempt
+        bool requiresAuth = envelope.Action != null || !_noAuthRequired.Contains(key);
+        if (requiresAuth && !session.IsAuthenticated)
+        {
+            return session.SendJsonAsync(
+                new { command = "ERROR", message = "Authentication required.", ackFor = envelope.MessageId }, ct);
+        }
 
         return _map.TryGetValue(key, out var handler)
             ? handler.HandleAsync(envelope, session, transport, ct)

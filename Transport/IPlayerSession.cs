@@ -29,6 +29,9 @@ public interface IPlayerSession
     // ── UDP encryption ────────────────────────────────────────────────────────
     UdpEncryption? UdpCrypto { get; }
 
+    // ── UDP remote endpoint (set by transport on first/each UDP packet received) ──
+    System.Net.IPEndPoint? UdpEndpoint { get; set; }
+
     // ── Network info ──────────────────────────────────────────────────────────
     /// <summary>Remote IP string, or null if unavailable. Used by auth handlers.</summary>
     string? RemoteIpAddress { get; }

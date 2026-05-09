@@ -12,7 +12,6 @@ using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
-using System.Numerics;
 using System.Linq;
 using System.IO;
 using MP.Server;
@@ -511,27 +510,19 @@ public sealed class GameServer : IHostedService, IDisposable, ITransportServer
             }
             
             // ── Routing: envelope (action) or legacy (command) ────────────────
-            // Determine the action/command type and whether this is an envelope packet.
-            string? udpAction = null;
-            bool isEnvelope = false;
-            JsonElement payloadEl = default;
-
+            // Normalise to an action name and delegate to the protocol layer via CommandRouter
+            string? udpAction;
             if (root.TryGetProperty("action", out JsonElement actionElement))
-            {
-                udpAction = actionElement.GetString()?.ToLower();
-                isEnvelope = true;
-                root.TryGetProperty("payload", out payloadEl);
-            }
+                udpAction = actionElement.GetString()?.ToLowerInvariant();
             else if (root.TryGetProperty("command", out JsonElement commandElement))
-            {
-                // Legacy: map known UDP commands to canonical action names
-                udpAction = commandElement.GetString()?.ToUpper() switch
+                udpAction = commandElement.GetString()?.ToUpperInvariant() switch
                 {
                     "UPDATE" => "move",
                     "INPUT"  => "input",
-                    var other => other?.ToLower()
+                    var other => other?.ToLowerInvariant()
                 };
-            }
+            else
+                udpAction = null;
 
             // Session ID is always at the root for both formats
             root.TryGetProperty("sessionId", out JsonElement sessionIdRootEl);
@@ -566,67 +557,18 @@ public sealed class GameServer : IHostedService, IDisposable, ITransportServer
                 return;
             }
 
-            if (udpAction == "move" && rootSessionId != null)
+            // Store the remote endpoint so UdpMovementHandler can construct the correct PlayerInfo
+            if (senderSession != null)
+                senderSession.UdpEndpoint = remoteEndPoint as IPEndPoint;
+
+            if (udpAction != null && senderSession != null)
             {
-                string? sessionId = rootSessionId;
-
-                if (string.IsNullOrEmpty(sessionId))
-                {
-                    _logger.LogWarning("⚠️ Received UDP move/update with empty sessionId");
-                    return;
-                }
-
-                // Update player UDP endpoint if it's our first packet from this player
-                if (_sessions.TryGetValue(sessionId, out PlayerSession? session) && session != null && session.CurrentRoomId != null)
-                {
-                    // Envelope: position lives under payload; legacy: position lives at root
-                    var posSource = isEnvelope && payloadEl.ValueKind != JsonValueKind.Undefined ? payloadEl : root;
-
-                    var playerInfo = new PlayerInfo(
-                        session.Id,
-                        session.PlayerName,
-                        remoteEndPoint as IPEndPoint,
-                        ParseVector3(posSource, "position"),
-                        ParseQuaternion(posSource, "rotation")
-                    );
-
-                    if (_rooms.TryGetValue(session.CurrentRoomId, out GameRoom? room) && room != null)
-                    {
-                        if (!room.ContainsPlayer(sessionId))
-                        {
-                            room.TryAddPlayer(playerInfo);
-                            _logger.LogDebug("🔄 Added player {PlayerId} to room {RoomId} via UDP move", sessionId, session.CurrentRoomId);
-                        }
-                        else
-                        {
-                            room.UpdatePlayerPosition(playerInfo);
-                        }
-
-                        await BroadcastPositionUpdateAsync(playerInfo, session.CurrentRoomId, sessionId);
-                    }
-                }
-            }
-            else if (udpAction == "input" && rootSessionId != null)
-            {
-                string? sessionId = rootSessionId;
-                // Envelope: roomId may be in root or payload; legacy: roomId at root
-                var inputSource = isEnvelope && payloadEl.ValueKind != JsonValueKind.Undefined ? payloadEl : root;
-                if (!string.IsNullOrEmpty(sessionId) && root.TryGetProperty("roomId", out JsonElement roomIdElement))
-                {
-                    string? roomId = roomIdElement.GetString();
-                    if (!string.IsNullOrEmpty(roomId) && _rooms.TryGetValue(roomId, out GameRoom? room) && room != null)
-                    {
-                        await ProcessInputCommandAsync(root, sessionId, roomId);
-                    }
-                }
-            }
-            else if (udpAction != null)
-            {
-                _logger.LogWarning("⚠️ Unhandled UDP action '{Action}' from {RemoteEndPoint}", udpAction, remoteEndPoint);
+                var envelope = new MessageEnvelope { Action = udpAction, Raw = root };
+                await _router.RouteAsync(envelope, senderSession, this, ct);
             }
             else
             {
-                _logger.LogWarning("⚠️ Received malformed UDP packet from {RemoteEndPoint}", remoteEndPoint);
+                _logger.LogWarning("⚠️ Received malformed or unroutable UDP packet from {RemoteEndPoint}", remoteEndPoint);
             }
         }
         catch (JsonException ex)
@@ -645,146 +587,42 @@ public sealed class GameServer : IHostedService, IDisposable, ITransportServer
         }
     }
 
-    // Add new method to process INPUT commands
-    private async Task ProcessInputCommandAsync(JsonElement root, string sessionId, string roomId)
+    /// <summary>
+    /// Implements <see cref="ITransportServer.BroadcastUdpToRoomAsync"/>.
+    /// Sends <paramref name="message"/> over UDP to every player in the room except the sender.
+    /// Uses per-session AES encryption when available; falls back to plain JSON otherwise.
+    /// </summary>
+    public async Task BroadcastUdpToRoomAsync(string roomId, object message, string excludeSessionId, CancellationToken ct = default)
     {
-        if (!root.TryGetProperty("input", out JsonElement inputElement))
-            return;
+        if (!_rooms.TryGetValue(roomId, out GameRoom? room) || room == null) return;
 
-        // Broadcast input to all other players in the room
-        if (_rooms.TryGetValue(roomId, out GameRoom? room) && room != null)
+        foreach (var player in room.Players)
         {
-            foreach (var player in room.Players)
+            if (player.Id == excludeSessionId) continue;
+            if (player.UdpEndpoint == null) continue;
+
+            try
             {
-                // Don't send the input back to the sender
-                if (player.Id == sessionId) continue;
-                
-                // Skip players without a UDP endpoint
-                if (player.UdpEndpoint == null) continue;
-                
-                try
+                if (_sessions.TryGetValue(player.Id, out PlayerSession? receiverSession) &&
+                    receiverSession?.UdpCrypto != null && receiverSession.IsAuthenticated)
                 {
-                    // Create input message object (not string)
-                    var inputMsg = JsonSerializer.Deserialize<object>(root.GetRawText());
-                    
-                    // Find the receiving player's session to check if they use UDP encryption
-                    if (_sessions.TryGetValue(player.Id, out PlayerSession? receiverSession) && 
-                        receiverSession?.UdpCrypto != null && receiverSession.IsAuthenticated && inputMsg != null)
-                    {
-                        // Send encrypted UDP packet
-                        byte[] encryptedPacket = receiverSession.UdpCrypto.CreatePacket(inputMsg);
-                        
-                        await _udpListener!.SendToAsync(encryptedPacket, player.UdpEndpoint);
-                        
-                        _logger.LogDebug("📤🔐 Broadcast encrypted input from {SenderId} to {ReceiverId}", 
-                            sessionId, player.Id);
-                    }
-                    else
-                    {
-                        // Send plain text UDP packet for non-encrypted clients
-                        var inputMsgStr = JsonSerializer.Serialize(inputMsg) + "\n";
-                        byte[] bytes = Encoding.UTF8.GetBytes(inputMsgStr);
-                        
-                        await _udpListener!.SendToAsync(bytes, player.UdpEndpoint);
-                        
-                        _logger.LogDebug("📤 Broadcast plain input from {SenderId} to {ReceiverId}", 
-                            sessionId, player.Id);
-                    }
+                    byte[] encryptedPacket = receiverSession.UdpCrypto.CreatePacket(message);
+                    if (_udpListener != null)
+                        await _udpListener.SendToAsync(encryptedPacket, player.UdpEndpoint, ct);
+                    _logger.LogDebug("📤🔐 UDP encrypted → {ReceiverId}", player.Id);
                 }
-                catch (Exception ex)
+                else
                 {
-                    _logger.LogError(ex, "❌ Error broadcasting input update to {PlayerId}", player.Id);
+                    string json = JsonSerializer.Serialize(message) + "\n";
+                    byte[] bytes = Encoding.UTF8.GetBytes(json);
+                    if (_udpListener != null)
+                        await _udpListener.SendToAsync(bytes, player.UdpEndpoint, ct);
+                    _logger.LogDebug("📤 UDP plain → {ReceiverId}", player.Id);
                 }
             }
-        }
-    }
-
-    private Vector3 ParseVector3(JsonElement root, string propertyName)
-    {
-        if (root.TryGetProperty(propertyName, out JsonElement vectorElement))
-        {
-            float x = vectorElement.TryGetProperty("x", out JsonElement xElement) ? xElement.GetSingle() : 0f;
-            float y = vectorElement.TryGetProperty("y", out JsonElement yElement) ? yElement.GetSingle() : 0f;
-            float z = vectorElement.TryGetProperty("z", out JsonElement zElement) ? zElement.GetSingle() : 0f;
-            
-            return new Vector3(x, y, z);
-        }
-        
-        return Vector3.Zero;
-    }
-
-    private Quaternion ParseQuaternion(JsonElement root, string propertyName)
-    {
-        if (root.TryGetProperty(propertyName, out JsonElement quatElement))
-        {
-            float x = quatElement.TryGetProperty("x", out JsonElement xElement) ? xElement.GetSingle() : 0f;
-            float y = quatElement.TryGetProperty("y", out JsonElement yElement) ? yElement.GetSingle() : 0f;
-            float z = quatElement.TryGetProperty("z", out JsonElement zElement) ? zElement.GetSingle() : 0f;
-            float w = quatElement.TryGetProperty("w", out JsonElement wElement) ? wElement.GetSingle() : 1f;
-            
-            return new Quaternion(x, y, z, w);
-        }
-        
-        return Quaternion.Identity;
-    }
-
-    private async Task BroadcastPositionUpdateAsync(PlayerInfo playerInfo, string roomId, string senderId)
-    {
-        if (_rooms.TryGetValue(roomId, out GameRoom? room) && room != null)
-        {
-            foreach (var player in room.Players)
+            catch (Exception ex)
             {
-                // Don't send the update back to the sender
-                if (player.Id == senderId) continue;
-                
-                // Skip players without a UDP endpoint
-                if (player.UdpEndpoint == null) continue;
-                
-                try
-                {
-                    // Create the update message
-                    var updateMsg = new 
-                    {
-                        command = "UPDATE",
-                        sessionId = playerInfo.Id,
-                        position = new { x = playerInfo.Position.X, y = playerInfo.Position.Y, z = playerInfo.Position.Z },
-                        rotation = new { x = playerInfo.Rotation.X, y = playerInfo.Rotation.Y, z = playerInfo.Rotation.Z, w = playerInfo.Rotation.W }
-                    };
-                    
-                    // Find the receiving player's session to check if they use UDP encryption
-                    if (_sessions.TryGetValue(player.Id, out PlayerSession? receiverSession) && 
-                        receiverSession?.UdpCrypto != null && receiverSession.IsAuthenticated)
-                    {
-                        // Send encrypted UDP packet
-                        byte[] encryptedPacket = receiverSession.UdpCrypto.CreatePacket(updateMsg);
-                        
-                        if (_udpListener != null)
-                        {
-                            await _udpListener.SendToAsync(encryptedPacket, player.UdpEndpoint);
-                        }
-                        
-                        _logger.LogDebug("📤🔐 Broadcast encrypted position update from {SenderId} to {ReceiverId}", 
-                            senderId, player.Id);
-                    }
-                    else
-                    {
-                        // Send plain text UDP packet for non-encrypted clients
-                        string json = JsonSerializer.Serialize(updateMsg) + "\n";
-                        byte[] bytes = Encoding.UTF8.GetBytes(json);
-                        
-                        if (_udpListener != null)
-                        {
-                            await _udpListener.SendToAsync(bytes, player.UdpEndpoint);
-                        }
-                        
-                        _logger.LogDebug("📤 Broadcast plain position update from {SenderId} to {ReceiverId}", 
-                            senderId, player.Id);
-                    }
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex, "❌ Error broadcasting position update to {PlayerId}", player.Id);
-                }
+                _logger.LogError(ex, "❌ Error broadcasting UDP to player {PlayerId}", player.Id);
             }
         }
     }
