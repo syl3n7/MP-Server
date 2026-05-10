@@ -12,13 +12,7 @@ namespace MP.Server.Security
     public class PacketValidator
     {
         private readonly ILogger<PacketValidator> _logger;
-        
-        // Physics validation constants
-        private const float MAX_POSITION_JUMP = 50.0f; // Maximum position change per frame
-        private const float MAX_SPEED = 200.0f; // Maximum speed in units/second
-        private const float MAX_ANGULAR_VELOCITY = 10.0f; // Maximum rotation change
-        private const float MIN_UPDATE_INTERVAL = 0.008f; // Minimum 8ms between updates (125 FPS) - more lenient
-        private const float MAX_UPDATE_INTERVAL = 5.0f; // Maximum 5 seconds between updates
+        private readonly PacketValidationConfig _config;
         
         // Input validation ranges
         private const float MAX_INPUT_AXIS = 1.0f; // Each axis clamped to [-1, 1]
@@ -26,9 +20,10 @@ namespace MP.Server.Security
         // Player state tracking for validation
         private readonly ConcurrentDictionary<string, PlayerValidationState> _playerStates = new();
         
-        public PacketValidator(ILogger<PacketValidator> logger)
+        public PacketValidator(ILogger<PacketValidator> logger, PacketValidationConfig? config = null)
         {
             _logger = logger;
+            _config = config ?? new PacketValidationConfig();
         }
         
         /// <summary>
@@ -59,7 +54,7 @@ namespace MP.Server.Security
                 
                 // Validate timestamp intervals
                 var timeDelta = (timestamp - state.LastUpdateTime).TotalSeconds;
-                if (timeDelta < MIN_UPDATE_INTERVAL)
+                if (timeDelta < _config.MinUpdateInterval / 1000.0)
                 {
                     _logger.LogDebug("⏱️ Player {SessionId} sending updates frequently: {Interval}ms (within acceptable range)", 
                         sessionId, timeDelta * 1000);
@@ -68,7 +63,7 @@ namespace MP.Server.Security
                     return ValidationResult.Accept();
                 }
                 
-                if (timeDelta > MAX_UPDATE_INTERVAL)
+                if (timeDelta > _config.MaxUpdateInterval / 1000.0)
                 {
                     _logger.LogWarning("⚠️ Player {SessionId} long gap between updates: {Interval}s", 
                         sessionId, timeDelta);
@@ -79,11 +74,11 @@ namespace MP.Server.Security
                 
                 // Validate position changes (teleport detection)
                 var positionDelta = Vector3.Distance(position, state.LastPosition);
-                var maxAllowedDistance = MAX_SPEED * (float)timeDelta;
+                var maxAllowedDistance = _config.MaxSpeed * (float)timeDelta;
                 
                 // Be more lenient for the first few updates (spawn/initial positioning)
                 var isInitialUpdate = timeDelta > 1.0f; // If more than 1 second gap, consider it initial
-                var effectiveMaxJump = isInitialUpdate ? MAX_POSITION_JUMP * 3 : MAX_POSITION_JUMP;
+                var effectiveMaxJump = isInitialUpdate ? _config.MaxPositionJump * 3 : _config.MaxPositionJump;
                 
                 if (positionDelta > Math.Max(maxAllowedDistance, effectiveMaxJump))
                 {
@@ -104,7 +99,7 @@ namespace MP.Server.Security
                 
                 // Validate rotation changes
                 var rotationDelta = CalculateRotationDelta(rotation, state.LastRotation);
-                var maxAllowedRotation = MAX_ANGULAR_VELOCITY * (float)timeDelta;
+                var maxAllowedRotation = _config.MaxAngularVelocity * (float)timeDelta;
                 
                 if (rotationDelta > maxAllowedRotation)
                 {
@@ -268,17 +263,10 @@ namespace MP.Server.Security
         
         private bool IsValidPosition(Vector3 position)
         {
-            // Define game world boundaries (adjust as needed for your track)
-            const float MAX_X = 1000f;
-            const float MIN_X = -1000f;
-            const float MAX_Y = 100f;
-            const float MIN_Y = -100f;
-            const float MAX_Z = 1000f;
-            const float MIN_Z = -1000f;
-            
-            return position.X >= MIN_X && position.X <= MAX_X &&
-                   position.Y >= MIN_Y && position.Y <= MAX_Y &&
-                   position.Z >= MIN_Z && position.Z <= MAX_Z;
+            var b = _config.WorldBounds;
+            return position.X >= -b && position.X <= b &&
+                   position.Y >= -b && position.Y <= b &&
+                   position.Z >= -b && position.Z <= b;
         }
         
         #endregion

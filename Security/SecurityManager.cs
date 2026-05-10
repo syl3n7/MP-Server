@@ -35,7 +35,7 @@ namespace MP.Server.Security
             _logger = logger;
             _loggingService = loggingService;
             
-            _packetValidator = new PacketValidator(logger as ILogger<PacketValidator> ?? NullLogger<PacketValidator>.Instance);
+            _packetValidator = new PacketValidator(logger as ILogger<PacketValidator> ?? NullLogger<PacketValidator>.Instance, _config.PacketValidation);
             _rateLimiter = new RateLimiter(logger);
             
             _logger?.LogInformation("Security Manager initialized with configuration");

@@ -41,20 +41,20 @@ namespace MP.Server.Security
         /// <summary>
         /// Maximum allowed position change per update (units)
         /// </summary>
-        [Range(1, 1000)]
-        public float MaxPositionJump { get; set; } = 50.0f;
+        [Range(1, float.MaxValue)]
+        public float MaxPositionJump { get; set; } = 5000.0f;
         
         /// <summary>
         /// Maximum allowed speed (units per second)
         /// </summary>
-        [Range(1, 500)]
-        public float MaxSpeed { get; set; } = 200.0f;
+        [Range(1, float.MaxValue)]
+        public float MaxSpeed { get; set; } = 50000.0f;
         
         /// <summary>
         /// Maximum allowed angular velocity (radians per second)
         /// </summary>
-        [Range(1, 50)]
-        public float MaxAngularVelocity { get; set; } = 10.0f;
+        [Range(1, 360)]
+        public float MaxAngularVelocity { get; set; } = 50.0f;
         
         /// <summary>
         /// Minimum time between updates (milliseconds)
@@ -71,8 +71,8 @@ namespace MP.Server.Security
         /// <summary>
         /// World boundary limits (±units from origin)
         /// </summary>
-        [Range(100, 10000)]
-        public float WorldBounds { get; set; } = 1000.0f;
+        [Range(100, float.MaxValue)]
+        public float WorldBounds { get; set; } = 100000.0f;
         
         /// <summary>
         /// Enable strict physics validation
