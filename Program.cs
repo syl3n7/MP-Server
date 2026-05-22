@@ -47,6 +47,7 @@ builder.Services.AddSingleton<ICommandHandler, AuthHandler>();
 builder.Services.AddSingleton<ICommandHandler, RoomHandler>();
 builder.Services.AddSingleton<ICommandHandler, ChatHandler>();
 builder.Services.AddSingleton<ICommandHandler, InventoryHandler>();
+builder.Services.AddSingleton<ICommandHandler, CombatHandler>();
 builder.Services.AddSingleton<ICommandHandler, SystemHandler>();
 builder.Services.AddSingleton<ICommandHandler, EnvelopeHandler>();
 builder.Services.AddSingleton<ICommandHandler, UdpMovementHandler>();

@@ -24,6 +24,9 @@ public sealed class GameRoom
     // The game client resolves the actual world position from its own scene.
     private readonly ConcurrentDictionary<string, PlayerInfo> _players = new();
     private readonly ConcurrentDictionary<string, int> _playerSpawnSlots = new();
+
+    // Tracks session IDs of players who have been killed and not yet respawned.
+    private readonly ConcurrentDictionary<string, byte> _deadPlayers = new();
     
     public GameRoom(DatabaseLoggingService? loggingService = null, ILogger? logger = null)
     {
@@ -74,6 +77,7 @@ public sealed class GameRoom
         var player = _players.TryGetValue(playerId, out var playerInfo) ? playerInfo : null;
         
         _playerSpawnSlots.TryRemove(playerId, out _);
+        _deadPlayers.TryRemove(playerId, out _);
         var removed = _players.TryRemove(playerId, out _);
         
         if (removed && player != null)
@@ -103,6 +107,19 @@ public sealed class GameRoom
     {
         return _players.ContainsKey(playerId);
     }
+
+    // ── Combat ────────────────────────────────────────────────────────────────
+
+    /// <summary>Mark a player as dead. Returns false if not in room or already dead.</summary>
+    public bool MarkPlayerDead(string playerId)
+        => ContainsPlayer(playerId) && _deadPlayers.TryAdd(playerId, 0);
+
+    /// <summary>Revive a dead player. Returns false if the player was not dead.</summary>
+    public bool RevivePlayer(string playerId)
+        => _deadPlayers.TryRemove(playerId, out _);
+
+    public bool IsPlayerDead(string playerId)
+        => _deadPlayers.ContainsKey(playerId);
     
     public bool UpdatePlayerPosition(PlayerInfo updatedPlayerInfo)
     {
