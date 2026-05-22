@@ -1,7 +1,10 @@
+using System.Text;
+using System.Text.Json;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using MP.Server.Data;
 using MP.Server.Models.Dtos;
+using MP.Server.Services;
 using MP.Server.Transport;
 
 namespace MP.Server.Controllers;
@@ -79,13 +82,15 @@ public class RoomViewModel
 
 public class DashboardController : Controller
 {
-    private readonly GameServer                    _gameServer;
+    private readonly GameServer                       _gameServer;
     private readonly IDbContextFactory<UserDbContext> _dbFactory;
+    private readonly DatabaseLoggingService           _loggingService;
 
-    public DashboardController(GameServer gameServer, IDbContextFactory<UserDbContext> dbFactory)
+    public DashboardController(GameServer gameServer, IDbContextFactory<UserDbContext> dbFactory, DatabaseLoggingService loggingService)
     {
-        _gameServer = gameServer;
-        _dbFactory  = dbFactory;
+        _gameServer     = gameServer;
+        _dbFactory      = dbFactory;
+        _loggingService = loggingService;
     }
 
     // GET /Dashboard
@@ -203,6 +208,78 @@ public class DashboardController : Controller
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
+
+    // GET /Dashboard/ExportLogs?type=connection&format=json&from=2026-05-01&to=2026-05-22
+    // type   : server | connection | security | room  (default: connection)
+    // format : json | csv                             (default: json)
+    [HttpGet]
+    public async Task<IActionResult> ExportLogs(
+        [FromQuery] string   type   = "connection",
+        [FromQuery] string   format = "json",
+        [FromQuery] DateTime? from  = null,
+        [FromQuery] DateTime? to    = null)
+    {
+        object data;
+        try
+        {
+            data = await _loggingService.ExportLogsAsync(type, from, to);
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { error = ex.Message, validTypes = new[] { "server", "connection", "security", "room" } });
+        }
+
+        var fileName = $"logs_{type}_{DateTime.UtcNow:yyyyMMdd_HHmmss}";
+
+        if (format.Equals("csv", StringComparison.OrdinalIgnoreCase))
+        {
+            var json    = JsonSerializer.SerializeToUtf8Bytes(data);
+            using var doc = JsonDocument.Parse(json);
+            var csv     = BuildCsv(doc.RootElement);
+            var bytes   = Encoding.UTF8.GetBytes(csv);
+            return File(bytes, "text/csv", $"{fileName}.csv");
+        }
+
+        return File(
+            Encoding.UTF8.GetBytes(JsonSerializer.Serialize(data, new JsonSerializerOptions { WriteIndented = true })),
+            "application/json",
+            $"{fileName}.json");
+    }
+
+    private static string BuildCsv(JsonElement array)
+    {
+        if (array.ValueKind != JsonValueKind.Array || array.GetArrayLength() == 0)
+            return string.Empty;
+
+        var sb      = new StringBuilder();
+        var headers = new List<string>();
+
+        // Derive column headers from the first object
+        foreach (var prop in array[0].EnumerateObject())
+            headers.Add(prop.Name);
+
+        sb.AppendLine(string.Join(",", headers.Select(CsvEscape)));
+
+        foreach (var row in array.EnumerateArray())
+        {
+            var values = headers.Select(h =>
+            {
+                if (row.TryGetProperty(h, out var val))
+                    return CsvEscape(val.ToString());
+                return "";
+            });
+            sb.AppendLine(string.Join(",", values));
+        }
+
+        return sb.ToString();
+    }
+
+    private static string CsvEscape(string value)
+    {
+        if (value.Contains(',') || value.Contains('"') || value.Contains('\n'))
+            return $"\"{ value.Replace("\"", "\"\"") }\"";
+        return value;
+    }
 
     private static string FormatUptime(TimeSpan t)
     {

@@ -8,21 +8,79 @@
 
 ## Table of Contents
 
-1. [Connection Overview](#1-connection-overview)
-2. [TLS TCP Connection](#2-tls-tcp-connection)
-3. [TCP Protocol — Reading & Writing](#3-tcp-protocol--reading--writing)
-4. [Authentication Flow](#4-authentication-flow)
-5. [Room Management](#5-room-management)
-6. [UDP Encryption (AES-256-CBC)](#6-udp-encryption-aes-256-cbc)
-7. [Sending & Receiving Position Updates](#7-sending--receiving-position-updates)
-8. [Sending Input Packets](#8-sending-input-packets)
-9. [Keeping the Session Alive](#9-keeping-the-session-alive)
-10. [Complete Command Reference](#10-complete-command-reference)
-11. [Full GDScript Skeleton](#11-full-gdscript-skeleton)
+1. [Message Envelope Format](#1-message-envelope-format)
+2. [Connection Overview](#2-connection-overview)
+3. [TLS TCP Connection](#3-tls-tcp-connection)
+4. [TCP Protocol — Reading & Writing](#4-tcp-protocol--reading--writing)
+5. [Authentication Flow](#5-authentication-flow)
+6. [Room Management](#6-room-management)
+7. [UDP Encryption (AES-256-CBC)](#7-udp-encryption-aes-256-cbc)
+8. [Sending & Receiving Position Updates](#8-sending--receiving-position-updates)
+9. [Sending Input Packets](#9-sending-input-packets)
+10. [Keeping the Session Alive](#10-keeping-the-session-alive)
+11. [Complete Command Reference](#11-complete-command-reference)
+12. [Full GDScript Skeleton](#12-full-gdscript-skeleton)
 
 ---
 
-## 1. Connection Overview
+## 1. Message Envelope Format
+
+The server supports two message styles on TCP. You can mix them freely.
+
+### Legacy style — `command` (UPPERCASE)
+
+Used by auth, room management, inventory, and chat. The routing key is the `command` field.
+
+```json
+{"command": "JOIN_ROOM", "roomId": "abc123"}
+```
+
+Server responses also use `command`:
+```json
+{"command": "JOIN_OK", "roomId": "abc123"}
+```
+
+> ⚠️ **Exception — inventory responses use `type` instead of `command`.**  
+> Match inventory server messages on `msg.get("type", "")`, not `"command"`.
+
+### Envelope style — `action` (lowercase)
+
+Used by gameplay actions: `heartbeat`, `snapshot_sync`, `player_kill`, `respawn`. The routing key is the `action` field.
+
+```json
+{"action": "heartbeat", "messageId": "optional-dedup-id"}
+```
+
+Server responses use `command` with an `ackFor` echo:
+```json
+{"command": "HEARTBEAT_ACK", "ackFor": "optional-dedup-id", "serverTimestampMs": 1234567890}
+```
+
+### messageId — deduplication
+
+Any TCP message (either style) may include an optional `messageId` string. If present, the server drops exact duplicate IDs within a **30-second window** per session — safe to use for retry logic.
+
+```json
+{"action": "respawn", "messageId": "respawn-attempt-1"}
+```
+
+`messageId` is echoed back as `ackFor` in the response so you can match it.
+
+### Protocol versioning
+
+There is no version field or version negotiation. Both client and server must stay in sync manually. This is a known future improvement.
+
+### Quick reference
+
+| You send | Key field | Server responds with |
+|---|---|---|
+| Legacy command | `"command": "UPPER_CASE"` | `"command": "RESULT"` |
+| Envelope action | `"action": "lower_case"` | `"command": "RESULT"`, optionally `"ackFor"` |
+| Inventory events | `"command": "INV_*"` | `"type": "INV_*"` |
+
+---
+
+## 2. Connection Overview
 
 ```
 Server addresses (default from appsettings.json — confirm with server host):
