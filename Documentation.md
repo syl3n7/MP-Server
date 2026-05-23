@@ -23,8 +23,8 @@ Clients connect over TLS-encrypted TCP (for commands, room management, chat) and
 - ✅ **IMPROVED**: Comprehensive error handling for malformed/encrypted UDP data
 
 Ports (defaults):
-- **TCP: 443** (TLS/SSL encrypted) - Uses standard HTTPS port for firewall traversal
-- **UDP: 443** (AES-256-CBC encrypted for authenticated users) - Same port as TCP 
+- **TCP: 7777** (TLS/SSL encrypted)
+- **UDP: 7778** (AES-256-CBC encrypted — all clients must encrypt)
 - **Dashboard Web UI: 8080** - Real-time monitoring, administration, and user management
 
 ## 1.1 Security Features
@@ -74,7 +74,7 @@ Ports (defaults):
   - Paginated user browsing with search functionality
   - Modal-based audit log viewing with detailed activity tracking
 - **Self-signed certificate generation**: Automatic certificate creation with public IP support
-- **Hybrid UDP support**: Server handles both encrypted (authenticated) and plain (legacy) UDP packets
+- **Mandatory UDP encryption**: All UDP packets must be AES-256-CBC encrypted. Unencrypted packets are rejected.
 - **Security event logging**: Comprehensive logging and threat level assessment with configurable retention
 
 ## 1.2 Recent Critical Fixes
@@ -86,9 +86,8 @@ Ports (defaults):
 
 **Solution**: Complete rewrite of UDP packet processing to:
 - Attempt decryption using each authenticated session's UdpCrypto
-- Gracefully fallback to plain JSON parsing for unauthenticated clients
-- Prevent crashes when receiving encrypted data
-- Maintain backward compatibility
+- Reject any packet that cannot be decrypted (no plain-text fallback)
+- Prevent crashes when receiving malformed data
 
 **Status**: ✅ **RESOLVED** - Server now properly handles all UDP packet types
 
@@ -122,7 +121,7 @@ Ports (defaults):
 **Status**: ✅ **LIVE** — `Services/AuthService.cs`, `Models/UserAuthToken`, `Data/UserDbContext` updated
 
 ## 2. Prerequisites
-- .NET 9.0 runtime
+- .NET 10.0 runtime
 - A TLS-capable TCP socket library
 - A UDP socket library for state updates  
 - UTF-8 support for text commands
@@ -272,15 +271,11 @@ All UDP communication happens after the client has joined or created a room via 
 - **FIXED**: Server now properly handles encryption/decryption (was broken previously)
 - Server automatically detects encrypted packets and decrypts them correctly
 
-**For Unauthenticated Players:**
-- UDP packets are sent as plain-text JSON (backward compatibility)
-- Limited functionality compared to authenticated users
-
-**Server-Side UDP Processing (Fixed):**
+**Server-Side UDP Processing:**
 - Server attempts decryption with each authenticated session's keys
-- Gracefully falls back to plain JSON parsing if decryption fails
-- No more JsonReaderException errors from encrypted packets
-- Supports hybrid environments with both encrypted and plain clients
+- Packets that cannot be decrypted are hard-rejected — there is no plain-text fallback
+- Session identity is determined cryptographically (whichever session key decrypts the packet is the sender)
+- The `sessionId` field in the payload is validated as an anti-spoofing check only
 
 ### 4.3 Packet Format (JSON-based)
 The server supports two primary types of UDP packets, both based on JSON:
@@ -926,13 +921,13 @@ services.AddScoped<EmailService>();
 - **Algorithm**: AES-256-CBC encryption
 - **Key Derivation**: Session-specific keys derived from session ID + shared secret
 - **Packet Format**: `[4-byte length][encrypted data]`
-- **Backward Compatibility**: Server accepts both encrypted and plain-text UDP packets
+- **Mandatory encryption**: Server rejects all unencrypted UDP packets
 - **Session Isolation**: Each authenticated player gets unique encryption keys
 
 ### 13.3 Password Security
-- **Hashing**: SHA-256 (should be upgraded to bcrypt/scrypt for production)
+- **Hashing**: BCrypt (via `AuthService`)
 - **Storage**: Only password hashes are stored, never plain text
-- **First-time Setup**: First connection with a username sets the password
+- **Account lockout**: 3 failed login attempts locks the account for 30 minutes
 - **Verification**: Subsequent connections require correct password
 
 ### 13.4 Security Best Practices for Clients
