@@ -180,6 +180,15 @@ var _tcp_buffer: PackedByteArray = PackedByteArray()
 
 func _poll_tls() -> void:
     _tls.poll()
+    var s := _tls.get_status()
+    if s == StreamPeerTLS.STATUS_DISCONNECTED or s == StreamPeerTLS.STATUS_ERROR:
+        # Server closed the connection — stop UDP immediately so stale-key packets
+        # are not sent while the session no longer exists on the server.
+        _is_authenticated = false
+        _session_id = ""
+        _current_room_id = ""
+        _tls = null
+        return
     while _tls.get_available_bytes() > 0:
         var byte_arr = _tls.get_data(1)
         if byte_arr[0] != OK:
@@ -575,7 +584,7 @@ The server accepts up to **120 UDP packets/second**. Sending at 30–60 Hz is re
 var _udp := PacketPeerUDP.new()
 
 func send_position(position: Vector3, rotation: Quaternion) -> void:
-    if not _is_authenticated:
+    if not _is_authenticated or _current_room_id.is_empty():
         return
     var data := {
         "command":  "UPDATE",
@@ -589,6 +598,11 @@ func send_position(position: Vector3, rotation: Quaternion) -> void:
 ### Receiving (poll in `_process`)
 
 The server sends position updates for OTHER players **back to you**, encrypted with YOUR key.
+
+> **Both sides must be sending UDP.** The server only knows a player's UDP endpoint after it
+> successfully receives and decrypts their first `UPDATE` packet. Until then, that player's
+> endpoint is unregistered and broadcasts skip them. In practice: as long as every connected
+> client calls `send_position` in `_process`, all players will see each other within one frame.
 
 ```gdscript
 func _poll_udp() -> void:
@@ -623,6 +637,7 @@ If your game relays raw inputs (e.g. steering, throttle) rather than positions, 
 func send_input(throttle: float, steer: float, brake: float) -> void:
     if not _is_authenticated or _current_room_id.is_empty():
         return
+
     var data := {
         "command":   "INPUT",
         "sessionId": _session_id,
@@ -803,6 +818,13 @@ func _poll_tls() -> void:
     if _tls == null:
         return
     _tls.poll()
+    var s := _tls.get_status()
+    if s == StreamPeerTLS.STATUS_DISCONNECTED or s == StreamPeerTLS.STATUS_ERROR:
+        _is_authenticated = false
+        _session_id = ""
+        _current_room_id = ""
+        _tls = null
+        return
     while _tls.get_available_bytes() > 0:
         var res := _tls.get_data(1)
         if res[0] != OK:
@@ -974,7 +996,7 @@ func _poll_udp() -> void:
                     Quaternion(r["x"], r["y"], r["z"], r["w"]))
 
 func send_position(position: Vector3, rotation: Quaternion) -> void:
-    if not _is_authenticated:
+    if not _is_authenticated or _current_room_id.is_empty():
         return
     _udp.put_packet(_make_udp_packet({
         "command":   "UPDATE",
@@ -1066,3 +1088,5 @@ These features are not yet implemented on the server. The guide and skeleton alr
 | Not sending heartbeat | Session drops after 60 s of TCP inactivity |
 | Calling `START_GAME` as non-host | Only the host (room creator) can start the game |
 | Sending `START_GAME` to wrong room | You must have joined/created a room first |
+| Sending UDP before joining a room | Server silently drops `UPDATE` packets with no `CurrentRoomId` — always join a room first |
+| Keeping UDP active after TCP drops | `_poll_tls` must reset `_is_authenticated` on `STATUS_DISCONNECTED`/`STATUS_ERROR`; otherwise stale-key packets fire against a dead session and pollute other sessions' decrypt loops |
