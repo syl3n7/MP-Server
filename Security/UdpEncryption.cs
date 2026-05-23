@@ -53,11 +53,15 @@ namespace MP.Server.Security
                 
                 using var decryptor = aes.CreateDecryptor();
                 var decryptedBytes = decryptor.TransformFinalBlock(encryptedData, 0, encryptedData.Length);
-                return Encoding.UTF8.GetString(decryptedBytes);
+                var json = Encoding.UTF8.GetString(decryptedBytes);
+                // Validate the result is actually JSON — this eliminates false-positive
+                // PKCS7 matches where a wrong key accidentally produces valid padding.
+                JsonDocument.Parse(json).Dispose();
+                return json;
             }
             catch
             {
-                return null; // Invalid or corrupted data
+                return null; // Invalid, corrupted, or wrong-key data
             }
         }
         

@@ -126,8 +126,12 @@ public sealed class BotClient : IAsyncDisposable
 
         _reader = new StreamReader(_ssl, Encoding.UTF8);
         var welcome = await _reader.ReadLineAsync(ct) ?? throw new IOException("No welcome from server");
-        // "CONNECTED|<sessionId>"
-        _sessionId = welcome.Contains('|') ? welcome.Split('|')[1] : welcome;
+        // Server sends JSON: {"command":"CONNECTED","sessionId":"<id>"}
+        using (var welcomeDoc = JsonDocument.Parse(welcome))
+        {
+            _sessionId = welcomeDoc.RootElement.GetProperty("sessionId").GetString()
+                ?? throw new IOException("Welcome message missing sessionId");
+        }
 
         _logger.LogInformation("[Bot {Name}] Connected, session={SessionId}", _username, _sessionId);
     }
