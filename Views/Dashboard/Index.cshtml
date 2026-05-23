@@ -160,8 +160,14 @@
     .info-row { display: flex; justify-content: space-between; padding: .45rem 0; border-bottom: 1px solid rgba(48,54,61,.5); font-size: .83rem; }
     .info-row:last-child { border-bottom: none; }
     .info-row .ik { color: var(--muted); }
-    .info-row .iv { font-weight: 600; }
-
+    .info-row .iv { font-weight: 600; }    /* ── Export button ────────────────────────────────────────────────────── */
+    .btn-export {
+        font-size: .65rem; padding: .2rem .55rem;
+        background: var(--border); color: var(--muted);
+        border: 1px solid var(--border); border-radius: .35rem;
+        text-decoration: none; transition: color .15s, border-color .15s;
+    }
+    .btn-export:hover { color: var(--text); border-color: var(--purple); }
     /* ── Auto-refresh badge ──────────────────────────────────────────────── */
     .refresh-badge { font-size: .7rem; color: var(--muted); }
     .refresh-badge i { color: var(--green); animation: spin 3s linear infinite; }
@@ -326,7 +332,48 @@
             </div>
         </div>
     </div>
-
+    <!-- ── Row 2b: Performance Metrics ────────────────────────────────── -->
+    <div class="section-card mb-3">
+        <div class="section-header"><i class="bi bi-cpu"></i> Performance Metrics <small class="text-secondary ms-2" style="font-size:.7rem">updated every 5 s</small></div>
+        <div class="row g-0 px-3 py-2">
+            <div class="col-6 col-md-3 col-lg-2 py-2 pe-3">
+                <div style="font-size:.72rem; color:var(--muted)">CPU</div>
+                <div id="m-cpu" class="fw-semibold" style="font-size:1.1rem">—</div>
+            </div>
+            <div class="col-6 col-md-3 col-lg-2 py-2 pe-3">
+                <div style="font-size:.72rem; color:var(--muted)">Working Set</div>
+                <div id="m-ram" class="fw-semibold" style="font-size:1.1rem">—</div>
+            </div>
+            <div class="col-6 col-md-3 col-lg-2 py-2 pe-3">
+                <div style="font-size:.72rem; color:var(--muted)">GC Heap</div>
+                <div id="m-gc-heap" class="fw-semibold" style="font-size:1.1rem">—</div>
+            </div>
+            <div class="col-6 col-md-3 col-lg-2 py-2 pe-3">
+                <div style="font-size:.72rem; color:var(--muted)">GC Allocated</div>
+                <div id="m-gc-alloc" class="fw-semibold" style="font-size:1.1rem">—</div>
+            </div>
+            <div class="col-6 col-md-3 col-lg-2 py-2 pe-3">
+                <div style="font-size:.72rem; color:var(--muted)">Bandwidth Out</div>
+                <div id="m-bw-out" class="fw-semibold c-blue" style="font-size:1.1rem">—</div>
+            </div>
+            <div class="col-6 col-md-3 col-lg-2 py-2 pe-3">
+                <div style="font-size:.72rem; color:var(--muted)">Bandwidth In</div>
+                <div id="m-bw-in" class="fw-semibold c-green" style="font-size:1.1rem">—</div>
+            </div>
+            <div class="col-6 col-md-3 col-lg-2 py-2 pe-3">
+                <div style="font-size:.72rem; color:var(--muted)">GC Gen0</div>
+                <div id="m-gc0" class="fw-semibold" style="font-size:1.1rem">—</div>
+            </div>
+            <div class="col-6 col-md-3 col-lg-2 py-2 pe-3">
+                <div style="font-size:.72rem; color:var(--muted)">GC Gen1</div>
+                <div id="m-gc1" class="fw-semibold" style="font-size:1.1rem">—</div>
+            </div>
+            <div class="col-6 col-md-3 col-lg-2 py-2 pe-3">
+                <div style="font-size:.72rem; color:var(--muted)">GC Gen2</div>
+                <div id="m-gc2" class="fw-semibold" style="font-size:1.1rem">—</div>
+            </div>
+        </div>
+    </div>
     <!-- ── Row 3: Active Sessions ─────────────────────────────────────────── -->
     <div class="section-card mb-3">
         <div class="section-header">
@@ -346,6 +393,8 @@
                         <th>Session ID</th>
                         <th>Auth</th>
                         <th>Room</th>
+                        <th>RTT</th>
+                        <th>Jitter</th>
                         <th>Last Activity</th>
                     </tr>
                 </thead>
@@ -374,6 +423,21 @@
                                 {
                                     <span class="text-muted">—</span>
                                 }
+                            </td>
+                            <td style="font-size:.78rem">
+                                @if (s.LastRttMs > 0)
+                                {
+                                    var rttColor = s.LastRttMs < 50 ? "c-green" : s.LastRttMs < 150 ? "c-yellow" : "c-red";
+                                    <span class="@rttColor fw-semibold">@s.LastRttMs.ToString("0")ms</span>
+                                }
+                                else { <span class="text-muted">—</span> }
+                            </td>
+                            <td style="font-size:.78rem">
+                                @if (s.JitterMs > 0)
+                                {
+                                    <span class="text-secondary">@s.JitterMs.ToString("0.0")ms</span>
+                                }
+                                else { <span class="text-muted">—</span> }
                             </td>
                             <td class="text-secondary" style="font-size:.78rem">@s.LastActivity.ToString("HH:mm:ss") UTC</td>
                         </tr>
@@ -595,6 +659,14 @@
         return new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
     }
 
+    function fmtBytes(b) {
+        if (b >= 1_048_576) return (b / 1_048_576).toFixed(1) + ' MB/s';
+        if (b >= 1024)      return (b / 1024).toFixed(1) + ' KB/s';
+        return b + ' B/s';
+    }
+
+    function fmtMb(mb) { return mb.toFixed(1) + ' MB'; }
+
     function refreshStats() {
         fetch('/Dashboard/Stats')
             .then(r => r.json())
@@ -620,9 +692,28 @@
             });
     }
 
+    function refreshMetrics() {
+        fetch('/Dashboard/Metrics')
+            .then(r => r.json())
+            .then(d => {
+                document.getElementById('m-cpu').textContent      = d.cpuPercent + '%';
+                document.getElementById('m-ram').textContent      = fmtMb(d.workingSetMb);
+                document.getElementById('m-gc-heap').textContent  = fmtMb(d.gcHeapMb);
+                document.getElementById('m-gc0').textContent      = d.gc0;
+                document.getElementById('m-gc1').textContent      = d.gc1;
+                document.getElementById('m-gc2').textContent      = d.gc2;
+                document.getElementById('m-bw-out').textContent   = fmtBytes(d.bytesSentPerSec);
+                document.getElementById('m-bw-in').textContent    = fmtBytes(d.bytesReceivedPerSec);
+                document.getElementById('m-gc-alloc').textContent = fmtMb(d.gcAllocatedMb);
+            })
+            .catch(() => {}); // non-critical, fail silently
+    }
+
     // Kick off right away then every 5 s
     refreshStats();
-    setInterval(refreshStats, 5000);
+    refreshMetrics();
+    setInterval(refreshStats,   5000);
+    setInterval(refreshMetrics, 5000);
 }());
 </script>
 }

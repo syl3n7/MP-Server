@@ -65,6 +65,8 @@ public class SessionViewModel
     public bool      IsAuthenticated { get; set; }
     public string?   CurrentRoomId   { get; set; }
     public DateTime  LastActivity    { get; set; }
+    public double    LastRttMs       { get; set; }
+    public double    JitterMs        { get; set; }
 }
 
 public class RoomViewModel
@@ -85,12 +87,18 @@ public class DashboardController : Controller
     private readonly GameServer                       _gameServer;
     private readonly IDbContextFactory<UserDbContext> _dbFactory;
     private readonly DatabaseLoggingService           _loggingService;
+    private readonly MetricsService                   _metrics;
 
-    public DashboardController(GameServer gameServer, IDbContextFactory<UserDbContext> dbFactory, DatabaseLoggingService loggingService)
+    public DashboardController(
+        GameServer gameServer,
+        IDbContextFactory<UserDbContext> dbFactory,
+        DatabaseLoggingService loggingService,
+        MetricsService metrics)
     {
         _gameServer     = gameServer;
         _dbFactory      = dbFactory;
         _loggingService = loggingService;
+        _metrics        = metrics;
     }
 
     // GET /Dashboard
@@ -116,6 +124,8 @@ public class DashboardController : Controller
                 IsAuthenticated = s.IsAuthenticated,
                 CurrentRoomId   = s.CurrentRoomId,
                 LastActivity    = s.LastActivity,
+                LastRttMs       = s.LastRttMs,
+                JitterMs        = s.JitterMs,
             })
             .OrderByDescending(s => s.LastActivity)
             .ToList();
@@ -208,6 +218,25 @@ public class DashboardController : Controller
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
+
+    // GET /Dashboard/Metrics  (JSON endpoint for live performance metrics)
+    [HttpGet]
+    public IActionResult Metrics()
+    {
+        var snap = _metrics.Current;
+        return Json(new
+        {
+            cpuPercent          = snap.CpuPercent,
+            workingSetMb        = snap.WorkingSetMb,
+            gcHeapMb            = snap.GcHeapMb,
+            gcAllocatedMb       = snap.GcAllocatedMb,
+            gc0                 = snap.Gc0,
+            gc1                 = snap.Gc1,
+            gc2                 = snap.Gc2,
+            bytesSentPerSec     = snap.BytesSentPerSec,
+            bytesReceivedPerSec = snap.BytesReceivedPerSec,
+        });
+    }
 
     // GET /Dashboard/ExportLogs?type=connection&format=json&from=2026-05-01&to=2026-05-22
     // type   : server | connection | security | room  (default: connection)

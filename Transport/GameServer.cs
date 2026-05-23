@@ -42,6 +42,16 @@ public sealed class GameServer : IHostedService, IDisposable, ITransportServer
     private Socket? _udpListener;
     private readonly ConcurrentDictionary<string, PlayerSession> _sessions = new();
     private readonly ConcurrentDictionary<string, GameRoom> _rooms = new();
+
+    // Bandwidth counters (incremented by PlayerSession on every send/receive)
+    private long _totalBytesSent;
+    private long _totalBytesReceived;
+
+    public long TotalBytesSent     => Interlocked.Read(ref _totalBytesSent);
+    public long TotalBytesReceived => Interlocked.Read(ref _totalBytesReceived);
+
+    internal void AddBytesSent(long bytes)     => Interlocked.Add(ref _totalBytesSent,     bytes);
+    internal void AddBytesReceived(long bytes) => Interlocked.Add(ref _totalBytesReceived, bytes);
     
     // Protocol command router
     private readonly CommandRouter _router;
@@ -368,6 +378,7 @@ public sealed class GameServer : IHostedService, IDisposable, ITransportServer
                     var result = await _udpListener!.ReceiveFromAsync(
                         new ArraySegment<byte>(buffer), endpoint, ct).ConfigureAwait(false);
                     var data = buffer.AsMemory(0, result.ReceivedBytes);
+                    AddBytesReceived(result.ReceivedBytes);
                     
                     _logger.LogDebug("📦 Received UDP packet of {Size} bytes from {ClientIP}:{ClientPort}",
                         result.ReceivedBytes, 
@@ -647,7 +658,18 @@ public sealed class GameServer : IHostedService, IDisposable, ITransportServer
                         _logger.LogInformation("⏰ Disconnecting inactive session {SessionId}", session.Id);
                         await session.DisconnectAsync().ConfigureAwait(false);
                         inactiveSessions++;
+                        continue;
                     }
+
+                    // Probe RTT for active sessions via the existing PING/PONG exchange
+                    try
+                    {
+                        session.PingSentAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+                        await session.SendJsonAsync(
+                            new { command = "PING" },
+                            ct).ConfigureAwait(false);
+                    }
+                    catch { /* session may be disconnecting */ }
                 }
 
                 var authenticatedSessions = _sessions.Values.Count(s => s.IsAuthenticated);

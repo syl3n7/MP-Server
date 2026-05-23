@@ -26,6 +26,16 @@ public interface IPlayerSession
     // ── Activity ──────────────────────────────────────────────────────────────
     DateTime LastActivity { get; }
 
+    // ── RTT / latency ─────────────────────────────────────────────────────────
+    /// <summary>Last measured round-trip time in milliseconds (0 if not yet measured).</summary>
+    double LastRttMs { get; }
+    /// <summary>Smoothed RTT jitter (EWMA) in milliseconds.</summary>
+    double JitterMs  { get; }
+    /// <summary>Records a new RTT sample and updates jitter (called by SystemHandler on PONG).</summary>
+    void RecordRtt(double rttMs);
+    /// <summary>Unix timestamp (ms) when the server last sent PING. 0 = no probe pending.</summary>
+    long PingSentAt { get; set; }
+
     // ── UDP encryption ────────────────────────────────────────────────────────
     UdpEncryption? UdpCrypto { get; }
 

@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
@@ -10,7 +11,7 @@ public sealed class SystemHandler : ICommandHandler
 {
     private readonly ILogger<SystemHandler> _logger;
 
-    public IReadOnlyList<string> Handles { get; } = ["PING", "NAME", "PLAYER_INFO", "BYE"];
+    public IReadOnlyList<string> Handles { get; } = ["PING", "PONG", "NAME", "PLAYER_INFO", "BYE"];
 
     public SystemHandler(ILogger<SystemHandler> logger) => _logger = logger;
 
@@ -18,11 +19,24 @@ public sealed class SystemHandler : ICommandHandler
         => envelope.Command switch
         {
             "PING"        => session.SendJsonAsync(new { command = "PONG" }, ct),
+            "PONG"        => HandlePong(session),
             "NAME"        => HandleName(envelope, session, ct),
             "PLAYER_INFO" => session.SendJsonAsync(new { command = "PLAYER_INFO", playerInfo = new { id = session.Id, playerName = session.PlayerName, currentRoomId = session.CurrentRoomId } }, ct),
             "BYE"         => HandleBye(session, ct),
             _             => Task.CompletedTask
         };
+
+    private static Task HandlePong(IPlayerSession session)
+    {
+        var sentAt = session.PingSentAt;
+        if (sentAt > 0)
+        {
+            var rttMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - sentAt;
+            session.RecordRtt(Math.Max(0, rttMs));
+            session.PingSentAt = 0;
+        }
+        return Task.CompletedTask;
+    }
 
     private async Task HandleName(MessageEnvelope e, IPlayerSession session, CancellationToken ct)
     {

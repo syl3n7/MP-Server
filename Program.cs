@@ -88,6 +88,12 @@ builder.Services.AddHostedService<ConsoleUiService>();
 // ── Load test bots (disabled by default — enable via LoadTest:Enabled in appsettings) ───
 builder.Services.AddHostedService<BotRunnerService>();
 
+// ── Metrics service ───────────────────────────────────────────────────────────
+// Registered as singleton so DashboardController can query it, and
+// as a hosted service so it samples in the background every 5 s.
+builder.Services.AddSingleton<MetricsService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<MetricsService>());
+
 // ── Dashboard HTTP port ───────────────────────────────────────────────────────
 int dashPort = builder.Configuration.GetValue<int>("DashboardSettings:Port", 8080);
 builder.WebHost.UseUrls($"http://0.0.0.0:{dashPort}");

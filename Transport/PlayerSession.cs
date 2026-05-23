@@ -54,6 +54,22 @@ public sealed class PlayerSession : IDisposable, IPlayerSession
         UdpCrypto             = new UdpEncryption(Id, _udpSharedSecret);
     }
 
+    // RTT / jitter tracking
+    private double _lastRttMs;
+    private double _jitterMs;
+    private long   _pingSentAt;
+    public double LastRttMs  => _lastRttMs;
+    public double JitterMs   => _jitterMs;
+    public long   PingSentAt { get => Interlocked.Read(ref _pingSentAt); set => Interlocked.Exchange(ref _pingSentAt, value); }
+
+    public void RecordRtt(double rttMs)
+    {
+        // EWMA jitter a la RFC 3550 (~6 % weight per sample)
+        var diff   = Math.Abs(rttMs - _lastRttMs);
+        _jitterMs  = _jitterMs + (diff - _jitterMs) / 16.0;
+        _lastRttMs = rttMs;
+    }
+
     // Idempotency: maps messageId → receipt timestamp (ms). Prevents duplicate processing.
     private readonly System.Collections.Concurrent.ConcurrentDictionary<string, long> _recentMessageIds = new();
     private const int MessageIdWindowMs = 30_000;
@@ -159,6 +175,7 @@ public sealed class PlayerSession : IDisposable, IPlayerSession
                 
                 while (TryParseMessage(ref buffer, out var message))
                 {
+                    _server.AddBytesReceived(message.Length);
                     LastActivity = DateTime.UtcNow;
                     _server.Logger.LogDebug("📨 Received message from {SessionId}: {MessageSize} bytes", 
                         Id, message.Length);
@@ -246,6 +263,7 @@ public sealed class PlayerSession : IDisposable, IPlayerSession
     public async Task SendTextAsync(string text, CancellationToken ct = default)
     {
         var bytes = Encoding.UTF8.GetBytes(text);
+        _server.AddBytesSent(bytes.Length);
         await SendAsync(bytes, ct);
     }
 
