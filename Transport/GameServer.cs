@@ -332,6 +332,23 @@ public sealed class GameServer : IHostedService, IDisposable, ITransportServer
             }
             finally
             {
+                // Notify room members about disconnect (covers BYE and connection-reset cases;
+                // LEAVE_ROOM sets CurrentRoomId=null beforehand to avoid double notification).
+                if (!string.IsNullOrEmpty(session.CurrentRoomId) &&
+                    _rooms.TryGetValue(session.CurrentRoomId, out var disconnectedRoom))
+                {
+                    var playerLeftMsg = new { command = "PLAYER_LEFT", sessionId = session.Id, name = session.PlayerName, roomId = session.CurrentRoomId };
+                    foreach (var p in disconnectedRoom.Players.Where(p => p.Id != session.Id))
+                    {
+                        if (_sessions.TryGetValue(p.Id, out var otherSession))
+                        {
+                            try { await otherSession.SendJsonAsync(playerLeftMsg).ConfigureAwait(false); }
+                            catch { /* ignore send errors during disconnect */ }
+                        }
+                    }
+                    disconnectedRoom.TryRemovePlayer(session.Id);
+                }
+
                 InventoryManager.Instance.OnPlayerLeft(session.Id);
                 _sessions.TryRemove(session.Id, out _);
                 _securityManager.RemoveClient(session.Id);

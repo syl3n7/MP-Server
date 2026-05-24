@@ -4,7 +4,12 @@
 MP-Server is a high-performance, secure TCP/UDP multiplayer racing game server with enterprise-grade security features.  
 Clients connect over TLS-encrypted TCP (for commands, room management, chat) and send/receive AES-encrypted UDP packets (for real‐time position updates).
 
-**Latest Updates (March 2026):**
+**Latest Updates (May 2026):**
+- ✅ **PLAYER_JOINED / PLAYER_LEFT**: Server now broadcasts room membership changes via TCP to all room members
+- ✅ **JOIN_OK includes players[]**: Joining clients immediately receive the list of existing room members
+- ✅ **Graceful + forced disconnect**: `PLAYER_LEFT` is sent on `BYE`, `LEAVE_ROOM`, and connection-reset disconnects
+
+**Previous Updates (March 2026):**
 - ✅ **AUTH REFACTOR**: Replaced in-memory SHA-256 auth with DB-backed BCrypt + persistent token system
 - ✅ **NEW COMMANDS**: `REGISTER`, `LOGIN`, `AUTO_AUTH` replace old `NAME+password` / `AUTHENTICATE` flow
 - ✅ **PERSISTENT SESSIONS**: Clients receive a 30-day token on login/register; `AUTO_AUTH` reconnects silently
@@ -216,7 +221,7 @@ Response: `{ "command": "NAME_OK", "name": "SpeedyPlayer" }`
 | `AUTO_AUTH`    | Client → Srv | `{"command":"AUTO_AUTH","token":"..."}` | `{"command":"AUTO_AUTH_OK","userId":1,"username":"name"}` or `{"command":"AUTO_AUTH_FAILED","message":"..."}` | No |
 | `NAME`         | Client → Srv | `{"command":"NAME","name":"DisplayName"}` | `{"command":"NAME_OK","name":"DisplayName"}` | **Yes** |
 | `CREATE_ROOM`  | Client → Srv | `{"command":"CREATE_ROOM","name":"roomName"}`   | `{"command":"ROOM_CREATED","roomId":"id","name":"roomName"}` | Yes |
-| `JOIN_ROOM`    | Client → Srv | `{"command":"JOIN_ROOM","roomId":"id"}`         | `{"command":"JOIN_OK","roomId":"id"}` or `{"command":"ERROR","message":"Failed to join room. Room may be full or inactive."}` | Yes |
+| `JOIN_ROOM`    | Client → Srv | `{"command":"JOIN_ROOM","roomId":"id"}`         | `{"command":"JOIN_OK","roomId":"id","players":[{"id":"...","name":"..."}]}` or `{"command":"ERROR","message":"Failed to join room. Room may be full or inactive."}` | Yes |
 | `LEAVE_ROOM`   | Client → Srv | `{"command":"LEAVE_ROOM"}`                      | `{"command":"LEAVE_OK","roomId":"id"}` or `{"command":"ERROR","message":"Cannot leave room. No room joined."}` | Yes |
 | `PING`         | Client → Srv | `{"command":"PING"}`                            | `{"command":"PONG"}`                  | No |
 | `LIST_ROOMS`   | Client → Srv | `{"command":"LIST_ROOMS"}`                     | `{"command":"ROOM_LIST","rooms":[{"id":"id","name":"roomName","playerCount":0,"isActive":false,"hostId":"hostId"}]}` | No |
@@ -234,6 +239,8 @@ The server may also send these messages without a direct client request:
 | ------- | ------- | ------ |
 | `RELAYED_MESSAGE` | Message relayed from another player | `{"command":"RELAYED_MESSAGE","senderId":"id","senderName":"name","message":"text"}` |
 | `GAME_STARTED` | Notification that a game has started | `{"command":"GAME_STARTED","roomId":"roomId","hostId":"hostId","spawnPositions":{"playerId1":{"x":66,"y":-2,"z":0.8},"playerId2":{"x":60,"y":-2,"z":0.8}}}` |
+| `PLAYER_JOINED` | Another player joined the same room | `{"command":"PLAYER_JOINED","sessionId":"id","name":"displayName","roomId":"id"}` |
+| `PLAYER_LEFT` | A player left or disconnected from the room | `{"command":"PLAYER_LEFT","sessionId":"id","name":"displayName","roomId":"id"}` |
 
 #### Error Handling
 - Malformed JSON commands return `{"command":"ERROR","message":"Invalid JSON format"}`.

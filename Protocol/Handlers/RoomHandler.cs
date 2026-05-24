@@ -64,6 +64,7 @@ public sealed class RoomHandler : ICommandHandler
             await session.SendJsonAsync(new { command = "ERROR", message = "Room not found." }, ct);
             return;
         }
+        var existingPlayers = room.Players.Select(p => new { id = p.Id, name = p.Name }).ToList();
         if (!room.TryAddPlayer(new PlayerInfo(session.Id, session.PlayerName, null, Vector3.Zero, Quaternion.Identity)))
         {
             await session.SendJsonAsync(new { command = "ERROR", message = "Failed to join room. Room may be full or inactive." }, ct);
@@ -71,7 +72,14 @@ public sealed class RoomHandler : ICommandHandler
         }
         session.CurrentRoomId = roomId;
         _logger.LogInformation("👤 Player {SessionId} ({Name}) joined room {RoomId}", session.Id, session.PlayerName, roomId);
-        await session.SendJsonAsync(new { command = "JOIN_OK", roomId }, ct);
+        await session.SendJsonAsync(new { command = "JOIN_OK", roomId, players = existingPlayers }, ct);
+        var playerJoinedMsg = new { command = "PLAYER_JOINED", sessionId = session.Id, name = session.PlayerName, roomId };
+        foreach (var existing in existingPlayers)
+        {
+            var existingSession = transport.GetPlayerSession(existing.id);
+            if (existingSession != null)
+                await existingSession.SendJsonAsync(playerJoinedMsg, ct);
+        }
     }
 
     private async Task HandleLeaveRoom(IPlayerSession session, ITransportServer transport, CancellationToken ct)
@@ -119,6 +127,9 @@ public sealed class RoomHandler : ICommandHandler
         _logger.LogInformation("👤 Player {SessionId} ({Name}) left room '{RoomName}' ({RoomId})",
             session.Id, session.PlayerName, roomName, prevRoomId);
         await session.SendJsonAsync(new { command = "LEAVE_OK", roomId = prevRoomId }, ct);
+        // Notify remaining room members
+        var playerLeftMsg = new { command = "PLAYER_LEFT", sessionId = session.Id, name = session.PlayerName, roomId = prevRoomId };
+        await transport.BroadcastToRoomAsync(prevRoomId, playerLeftMsg, ct);
     }
 
     private async Task HandleListRooms(IPlayerSession session, ITransportServer transport, CancellationToken ct)
@@ -232,12 +243,20 @@ public sealed class RoomHandler : ICommandHandler
                 _autoJoinRoomName, room.Id, session.Id);
         }
 
+        var existingPlayers = room.Players.Select(p => new { id = p.Id, name = p.Name }).ToList();
         room.TryAddPlayer(new PlayerInfo(session.Id, session.PlayerName, null, Vector3.Zero, Quaternion.Identity));
         session.CurrentRoomId = room.Id;
 
         _logger.LogInformation("🤖 AUTO_JOIN: {SessionId} ({Name}) → room '{RoomName}' ({RoomId}) [{Count}/{Max}]",
             session.Id, session.PlayerName, room.Name, room.Id, room.PlayerCount, room.MaxPlayers);
 
-        await session.SendJsonAsync(new { command = "JOIN_OK", roomId = room.Id, autoJoined = true }, ct);
+        await session.SendJsonAsync(new { command = "JOIN_OK", roomId = room.Id, autoJoined = true, players = existingPlayers }, ct);
+        var playerJoinedMsg = new { command = "PLAYER_JOINED", sessionId = session.Id, name = session.PlayerName, roomId = room.Id };
+        foreach (var existing in existingPlayers)
+        {
+            var existingSession = transport.GetPlayerSession(existing.id);
+            if (existingSession != null)
+                await existingSession.SendJsonAsync(playerJoinedMsg, ct);
+        }
     }
 }

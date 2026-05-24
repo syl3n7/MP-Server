@@ -237,6 +237,10 @@ func _on_tcp_message(raw: String) -> void:
             _current_room_id = msg["roomId"]
         "JOIN_OK":
             _current_room_id = msg["roomId"]
+            # Spawn ghosts for players already in the room
+            for p in msg.get("players", []):
+                if p["id"] != _session_id:
+                    emit_signal("player_joined", p["id"], p["name"])
         "ROOM_LIST":
             emit_signal("room_list_received", msg["rooms"])
         "ROOM_PLAYERS":
@@ -244,10 +248,10 @@ func _on_tcp_message(raw: String) -> void:
         "GAME_STARTED":
             # spawnPositions dict: key = sessionId, value = {"spawnIndex": N}
             emit_signal("game_started", msg.get("spawnPositions", {}))
-        "PLAYER_JOINED":                            # Phase 3 — not yet sent by server
-            emit_signal("player_joined", msg.get("playerId", ""), msg.get("playerName", ""))
-        "PLAYER_LEFT":                              # Phase 3 — not yet sent by server
-            emit_signal("player_left", msg.get("playerId", ""))
+        "PLAYER_JOINED":
+            emit_signal("player_joined", msg.get("sessionId", ""), msg.get("name", ""))
+        "PLAYER_LEFT":
+            emit_signal("player_left", msg.get("sessionId", ""))
         "GAME_ENDED":                               # Phase 3 — not yet sent by server
             emit_signal("game_ended")
         "PONG":
@@ -405,9 +409,9 @@ _send({"command": "CREATE_ROOM", "name": "My Room", "maxPlayers": 4})
 ### Join room
 ```gdscript
 _send({"command": "JOIN_ROOM", "roomId": target_room_id})
-# Response: {"command":"JOIN_OK","roomId":"..."}
-# ⚠️ Phase 3: response will also include "players":[{"id":"...","name":"..."}] and "spawnIndex":0
-# ⚠️ Phase 3: other room members will receive {"command":"PLAYER_JOINED","playerId":"...","playerName":"..."}
+# Response: {"command":"JOIN_OK","roomId":"...","players":[{"id":"...","name":"..."}]}
+# players[] contains everyone already in the room — spawn Remote_[id] ghosts for each
+# Other room members simultaneously receive: {"command":"PLAYER_JOINED","sessionId":"...","name":"...","roomId":"..."}
 ```
 
 ### Get players in current room
@@ -430,7 +434,7 @@ _send({"command": "START_GAME"})
 _send({"command": "LEAVE_ROOM"})
 # Response: {"command":"LEAVE_OK","roomId":"..."}
 # If you were host and others remain, host is transferred to the next player
-# ⚠️ Phase 3: other room members will receive {"command":"PLAYER_LEFT","playerId":"..."}
+# Other room members receive: {"command":"PLAYER_LEFT","sessionId":"...","name":"...","roomId":"..."}
 ```
 
 ### Chat message (in-room)
@@ -700,7 +704,7 @@ func _send_heartbeat() -> void:
 | `PLAYER_INFO` | ✓ | — | `PLAYER_INFO` + `playerInfo` | — |
 | `NAME` | Auth | `name` | `NAME_OK` + `name` | `ERROR` |
 | `CREATE_ROOM` | Auth | `name`, `maxPlayers` (opt, default 20) | `ROOM_CREATED` + `roomId`, `name`, `maxPlayers` | `ERROR` |
-| `JOIN_ROOM` | Auth | `roomId` | `JOIN_OK` + `roomId` | `ERROR` |
+| `JOIN_ROOM` | Auth | `roomId` | `JOIN_OK` + `roomId`, `players[]` | `ERROR` |
 | `LEAVE_ROOM` | Auth | — | `LEAVE_OK` + `roomId` | `ERROR` |
 | `GET_ROOM_PLAYERS` | Auth | — | `ROOM_PLAYERS` + `roomId`, `players[]` | `ERROR` |
 | `START_GAME` | Auth (host) | — | `GAME_STARTED` broadcast + `spawnPositions` | `ERROR` |
@@ -1060,18 +1064,16 @@ func disconnect_from_server() -> void:
 
 ---
 
-## Planned Protocol Changes (Phase 3)
+## Protocol Status
 
-These features are not yet implemented on the server. The guide and skeleton already include the **client-side handlers** so you won't need to touch this code when the server is updated.
-
-| Feature | Current behaviour | Phase 3 change |
+| Feature | Status | Notes |
 |---|---|---|
-| Player joins room | Joining client gets `JOIN_OK` with only `roomId` | `JOIN_OK` will include `players[]` and `spawnIndex` |
-| Player joins room | Other members get no notification | Server will broadcast `PLAYER_JOINED` |
-| Player leaves / disconnects | Other members get no notification | Server will broadcast `PLAYER_LEFT` |
-| Game end | No server-side end signal | `END_GAME` command + `GAME_ENDED` broadcast |
-| Room state | Rooms never reset after a game | Room state machine: waiting → playing → ended |
-| Empty rooms | Never removed | Garbage-collected after 1 hour idle |
+| `JOIN_OK` includes `players[]` | ✅ **Implemented** | Iterate and spawn `Remote_[id]` ghosts immediately |
+| `PLAYER_JOINED` broadcast | ✅ **Implemented** | Sent via TCP to all existing room members when someone joins |
+| `PLAYER_LEFT` broadcast | ✅ **Implemented** | Sent via TCP on `LEAVE_ROOM`, graceful `BYE`, and connection-reset disconnect |
+| Game end | ⏳ Phase 3 | `END_GAME` command + `GAME_ENDED` broadcast |
+| Room state machine | ⏳ Phase 3 | waiting → playing → ended |
+| Empty room GC | ⏳ Phase 3 | Garbage-collected after 1 hour idle |
 
 ---
 
