@@ -126,13 +126,21 @@ public class ConsoleUI
         }
         
         Console.WriteLine($"Total rooms: {rooms.Count}");
-        Console.WriteLine("ID                               | Name                | Players | Active | Host");
-        Console.WriteLine("----------------------------------|---------------------|---------|--------|----------------------------------");
-        
         foreach (var room in rooms)
         {
-            Console.WriteLine($"{room.Id,-34} | {TruncateString(room.Name, 19),-19} | {room.PlayerCount,7} | {(room.IsActive ? "Yes" : "No"),6} | {TruncateString(room.HostId ?? "none", 34)}");
+            Console.WriteLine($"\n  Room: {room.Name}  [{room.Id[..8]}]  ({room.PlayerCount}/{room.MaxPlayers} players)");
+            Console.WriteLine( "  ----------------------------------------------------------------");
+            if (room.PlayerCount == 0)
+            {
+                Console.WriteLine("    (empty)");
+            }
+            else
+            {
+                foreach (var p in room.Players)
+                    Console.WriteLine($"    {TruncateString(p.Name, 24),-24}  {p.Id[..8]}");
+            }
         }
+        Console.WriteLine();
     }
 
     private void ListSessions()
@@ -144,14 +152,22 @@ public class ConsoleUI
             Console.WriteLine("No active sessions.");
             return;
         }
-        
+
+        var rooms = _server.GetAllRooms();
+        var roomNameById = rooms.ToDictionary(r => r.Id, r => r.Name);
+
         Console.WriteLine($"Total active sessions: {sessions.Count}");
-        Console.WriteLine("ID                               | Name                | In Room | Last Activity");
-        Console.WriteLine("----------------------------------|---------------------|---------|-------------------------");
+        Console.WriteLine("Session  | Name                     | Room");
+        Console.WriteLine("---------|--------------------------|--------------------------");
         
         foreach (var session in sessions)
         {
-            Console.WriteLine($"{session.Id,-34} | {TruncateString(session.PlayerName, 19),-19} | {(string.IsNullOrEmpty(session.CurrentRoomId) ? "No" : "Yes"),7} | {session.LastActivity.ToLocalTime()}");
+            string roomLabel = string.IsNullOrEmpty(session.CurrentRoomId)
+                ? "(lobby)"
+                : roomNameById.TryGetValue(session.CurrentRoomId, out var rName)
+                    ? $"{rName} [{session.CurrentRoomId[..8]}]"
+                    : $"[{session.CurrentRoomId[..8]}]";
+            Console.WriteLine($"{session.Id[..8],-8} | {TruncateString(session.PlayerName, 24),-24} | {roomLabel}");
         }
     }
 
