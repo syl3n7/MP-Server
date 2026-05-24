@@ -235,12 +235,53 @@ public class DashboardController : Controller
             gc2                 = snap.Gc2,
             bytesSentPerSec     = snap.BytesSentPerSec,
             bytesReceivedPerSec = snap.BytesReceivedPerSec,
+            avgRttMs            = snap.AvgRttMs,
+            avgJitterMs         = snap.AvgJitterMs,
         });
     }
 
+    // GET /Dashboard/Sessions  (JSON endpoint for live sessions table)
+    [HttpGet]
+    public IActionResult Sessions()
+    {
+        var sessions = _gameServer.GetAllSessions()
+            .OrderByDescending(s => s.LastActivity)
+            .Select(s => new
+            {
+                id              = s.Id,
+                playerName      = s.PlayerName,
+                isAuthenticated = s.IsAuthenticated,
+                currentRoomId   = s.CurrentRoomId,
+                lastActivity    = s.LastActivity.ToString("HH:mm:ss"),
+                lastRttMs       = s.LastRttMs,
+                jitterMs        = s.JitterMs,
+            });
+        return Json(sessions);
+    }
+
+    // GET /Dashboard/MetricsHistory  (returns full 5-min ring buffer for export/analysis)
+    [HttpGet]
+    public IActionResult MetricsHistory()
+    {
+        var history = _metrics.GetHistory().Select(s => new
+        {
+            timestamp           = s.Timestamp.ToString("o"),
+            cpuPercent          = s.CpuPercent,
+            workingSetMb        = s.WorkingSetMb,
+            gcHeapMb            = s.GcHeapMb,
+            gcAllocatedMb       = s.GcAllocatedMb,
+            gc0                 = s.Gc0,
+            gc1                 = s.Gc1,
+            gc2                 = s.Gc2,
+            bytesSentPerSec     = s.BytesSentPerSec,
+            bytesReceivedPerSec = s.BytesReceivedPerSec,
+            avgRttMs            = s.AvgRttMs,
+            avgJitterMs         = s.AvgJitterMs,
+        });
+        return Json(history);
+    }
+
     // GET /Dashboard/ExportLogs?type=connection&format=json&from=2026-05-01&to=2026-05-22
-    // type   : server | connection | security | room  (default: connection)
-    // format : json | csv                             (default: json)
     [HttpGet]
     public async Task<IActionResult> ExportLogs(
         [FromQuery] string   type   = "connection",

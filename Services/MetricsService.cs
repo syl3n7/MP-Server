@@ -21,7 +21,9 @@ public sealed record MetricsSnapshot(
     int      Gc1,
     int      Gc2,
     long     BytesSentPerSec,
-    long     BytesReceivedPerSec
+    long     BytesReceivedPerSec,
+    double   AvgRttMs,
+    double   AvgJitterMs
 );
 
 /// <summary>
@@ -48,7 +50,7 @@ public sealed class MetricsService : BackgroundService
     private long _prevBwTicks;
 
     private volatile MetricsSnapshot _current =
-        new(DateTime.UtcNow, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+        new(DateTime.UtcNow, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
 
     public MetricsSnapshot Current => _current;
 
@@ -128,10 +130,18 @@ public sealed class MetricsService : BackgroundService
         _prevReceived = totalReceived;
         _prevBwTicks  = nowTicks;
 
+        // ── RTT / Jitter ──────────────────────────────────────────────────────
+        var allSessions = _gameServer.GetAllSessions();
+        var rttSamples  = allSessions.Where(s => s.LastRttMs > 0).Select(s => s.LastRttMs).ToList();
+        var jitSamples  = allSessions.Where(s => s.JitterMs  > 0).Select(s => s.JitterMs).ToList();
+        var avgRttMs    = rttSamples.Count > 0 ? Math.Round(rttSamples.Average(), 1) : 0.0;
+        var avgJitterMs = jitSamples.Count > 0 ? Math.Round(jitSamples.Average(), 1) : 0.0;
+
         // ── Store snapshot ────────────────────────────────────────────────────
         var snap = new MetricsSnapshot(
             now, cpuPct, workingSetMb, gcHeapMb, gcAllocatedMb,
-            gc0, gc1, gc2, bytesSentPerSec, bytesReceivedPerSec);
+            gc0, gc1, gc2, bytesSentPerSec, bytesReceivedPerSec,
+            avgRttMs, avgJitterMs);
 
         lock (_lock)
         {

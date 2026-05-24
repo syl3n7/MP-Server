@@ -372,6 +372,14 @@
                 <div style="font-size:.72rem; color:var(--muted)">GC Gen2</div>
                 <div id="m-gc2" class="fw-semibold" style="font-size:1.1rem">—</div>
             </div>
+            <div class="col-6 col-md-3 col-lg-2 py-2 pe-3">
+                <div style="font-size:.72rem; color:var(--muted)">Avg RTT</div>
+                <div id="m-rtt" class="fw-semibold c-cyan" style="font-size:1.1rem">—</div>
+            </div>
+            <div class="col-6 col-md-3 col-lg-2 py-2 pe-3">
+                <div style="font-size:.72rem; color:var(--muted)">Avg Jitter</div>
+                <div id="m-jitter" class="fw-semibold c-yellow" style="font-size:1.1rem">—</div>
+            </div>
         </div>
     </div>
     <!-- ── Row 3: Active Sessions ─────────────────────────────────────────── -->
@@ -380,71 +388,65 @@
             <i class="bi bi-people-fill"></i> Active Sessions
             <span class="cnt" id="cnt-sessions">@Model.ActiveSessions.Count</span>
         </div>
-        @if (Model.ActiveSessions.Count == 0)
-        {
-            <div class="empty-state"><i class="bi bi-person-x"></i>No active sessions</div>
-        }
-        else
-        {
-            <table class="table dash-table">
-                <thead>
+        <div id="sessions-empty" class="empty-state"@(Model.ActiveSessions.Count > 0 ? " style=\"display:none\"" : "")><i class="bi bi-person-x"></i>No active sessions</div>
+        <table class="table dash-table" id="sessions-table"@(Model.ActiveSessions.Count == 0 ? " style=\"display:none\"" : "")>
+            <thead>
+                <tr>
+                    <th>Player</th>
+                    <th>Session ID</th>
+                    <th>Auth</th>
+                    <th>Room</th>
+                    <th>RTT</th>
+                    <th>Jitter</th>
+                    <th>Last Activity</th>
+                </tr>
+            </thead>
+            <tbody id="sessions-tbody">
+                @foreach (var s in Model.ActiveSessions)
+                {
+                    var rttColor = s.LastRttMs <= 0 ? "" : s.LastRttMs < 50 ? "c-green" : s.LastRttMs < 150 ? "c-yellow" : "c-red";
                     <tr>
-                        <th>Player</th>
-                        <th>Session ID</th>
-                        <th>Auth</th>
-                        <th>Room</th>
-                        <th>RTT</th>
-                        <th>Jitter</th>
-                        <th>Last Activity</th>
+                        <td><i class="bi bi-person me-1 text-secondary"></i>@s.PlayerName</td>
+                        <td class="mono text-secondary" style="font-size:.72rem">@s.Id[..8]…</td>
+                        <td>
+                            @if (s.IsAuthenticated)
+                            {
+                                <span class="badge bg-success" style="font-size:.68rem"><i class="bi bi-check-circle me-1"></i>Auth</span>
+                            }
+                            else
+                            {
+                                <span class="badge bg-secondary" style="font-size:.68rem">Guest</span>
+                            }
+                        </td>
+                        <td class="text-secondary">
+                            @if (s.CurrentRoomId != null)
+                            {
+                                <span class="mono" style="font-size:.72rem">@s.CurrentRoomId[..8]…</span>
+                            }
+                            else
+                            {
+                                <span class="text-muted">—</span>
+                            }
+                        </td>
+                        <td style="font-size:.78rem">
+                            @if (s.LastRttMs > 0)
+                            {
+                                <span class="@rttColor fw-semibold">@s.LastRttMs.ToString("0")ms</span>
+                            }
+                            else { <span class="text-muted">—</span> }
+                        </td>
+                        <td style="font-size:.78rem">
+                            @if (s.JitterMs > 0)
+                            {
+                                <span class="text-secondary">@s.JitterMs.ToString("0.0")ms</span>
+                            }
+                            else { <span class="text-muted">—</span> }
+                        </td>
+                        <td class="text-secondary" style="font-size:.78rem">@s.LastActivity.ToString("HH:mm:ss") UTC</td>
                     </tr>
-                </thead>
-                <tbody>
-                    @foreach (var s in Model.ActiveSessions)
-                    {
-                        <tr>
-                            <td><i class="bi bi-person me-1 text-secondary"></i>@s.PlayerName</td>
-                            <td class="mono text-secondary" style="font-size:.72rem">@s.Id[..8]…</td>
-                            <td>
-                                @if (s.IsAuthenticated)
-                                {
-                                    <span class="badge bg-success" style="font-size:.68rem"><i class="bi bi-check-circle me-1"></i>Auth</span>
-                                }
-                                else
-                                {
-                                    <span class="badge bg-secondary" style="font-size:.68rem">Guest</span>
-                                }
-                            </td>
-                            <td class="text-secondary">
-                                @if (s.CurrentRoomId != null)
-                                {
-                                    <span class="mono" style="font-size:.72rem">@s.CurrentRoomId[..8]…</span>
-                                }
-                                else
-                                {
-                                    <span class="text-muted">—</span>
-                                }
-                            </td>
-                            <td style="font-size:.78rem">
-                                @if (s.LastRttMs > 0)
-                                {
-                                    var rttColor = s.LastRttMs < 50 ? "c-green" : s.LastRttMs < 150 ? "c-yellow" : "c-red";
-                                    <span class="@rttColor fw-semibold">@s.LastRttMs.ToString("0")ms</span>
-                                }
-                                else { <span class="text-muted">—</span> }
-                            </td>
-                            <td style="font-size:.78rem">
-                                @if (s.JitterMs > 0)
-                                {
-                                    <span class="text-secondary">@s.JitterMs.ToString("0.0")ms</span>
-                                }
-                                else { <span class="text-muted">—</span> }
-                            </td>
-                            <td class="text-secondary" style="font-size:.78rem">@s.LastActivity.ToString("HH:mm:ss") UTC</td>
-                        </tr>
-                    }
-                </tbody>
-            </table>
-        }
+                }
+            </tbody>
+        </table>
     </div>
 
     <!-- ── Row 4: Active Rooms ───────────────────────────────────────────── -->
@@ -658,26 +660,24 @@
     function fmtTime() {
         return new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
     }
-
     function fmtBytes(b) {
         if (b >= 1_048_576) return (b / 1_048_576).toFixed(1) + ' MB/s';
         if (b >= 1024)      return (b / 1024).toFixed(1) + ' KB/s';
         return b + ' B/s';
     }
-
-    function fmtMb(mb) { return mb.toFixed(1) + ' MB'; }
+    function fmtMb(mb)  { return mb.toFixed(1) + ' MB'; }
+    function fmtMs(ms)  { return ms > 0 ? ms.toFixed(1) + ' ms' : '—'; }
 
     function refreshStats() {
         fetch('/Dashboard/Stats')
             .then(r => r.json())
             .then(d => {
                 failCount = 0;
-                document.getElementById('stat-sessions').textContent  = d.sessions;
-                document.getElementById('stat-rooms').textContent     = d.rooms;
-                document.getElementById('stat-uptime').textContent    = d.uptime;
-                document.getElementById('info-uptime').textContent    = d.uptime;
-                document.getElementById('cnt-sessions').textContent   = d.sessions;
-                document.getElementById('cnt-rooms').textContent      = d.rooms;
+                document.getElementById('stat-sessions').textContent = d.sessions;
+                document.getElementById('stat-rooms').textContent    = d.rooms;
+                document.getElementById('stat-uptime').textContent   = d.uptime;
+                document.getElementById('info-uptime').textContent   = d.uptime;
+                document.getElementById('cnt-rooms').textContent     = d.rooms;
                 document.getElementById('last-refresh').innerHTML =
                     '<i class="bi bi-arrow-repeat me-1"></i>Updated ' + fmtTime();
             })
@@ -685,10 +685,7 @@
                 failCount++;
                 document.getElementById('last-refresh').innerHTML =
                     '<i class="bi bi-exclamation-circle me-1 text-warning"></i>Retry…';
-                if (failCount > 3) {
-                    // Full reload after repeated failures
-                    window.location.reload();
-                }
+                if (failCount > 3) window.location.reload();
             });
     }
 
@@ -705,15 +702,63 @@
                 document.getElementById('m-bw-out').textContent   = fmtBytes(d.bytesSentPerSec);
                 document.getElementById('m-bw-in').textContent    = fmtBytes(d.bytesReceivedPerSec);
                 document.getElementById('m-gc-alloc').textContent = fmtMb(d.gcAllocatedMb);
+                document.getElementById('m-rtt').textContent      = fmtMs(d.avgRttMs);
+                document.getElementById('m-jitter').textContent   = fmtMs(d.avgJitterMs);
             })
-            .catch(() => {}); // non-critical, fail silently
+            .catch(() => {});
     }
 
-    // Kick off right away then every 5 s
+    function refreshSessions() {
+        fetch('/Dashboard/Sessions')
+            .then(r => r.json())
+            .then(sessions => {
+                document.getElementById('cnt-sessions').textContent  = sessions.length;
+                document.getElementById('stat-sessions').textContent = sessions.length;
+                const empty = document.getElementById('sessions-empty');
+                const table = document.getElementById('sessions-table');
+                const tbody = document.getElementById('sessions-tbody');
+                if (sessions.length === 0) {
+                    empty.style.display = '';
+                    table.style.display = 'none';
+                    return;
+                }
+                empty.style.display = 'none';
+                table.style.display = '';
+                tbody.innerHTML = sessions.map(s => {
+                    const rttColor = s.lastRttMs <= 0 ? '' : s.lastRttMs < 50 ? 'c-green' : s.lastRttMs < 150 ? 'c-yellow' : 'c-red';
+                    const rttCell  = s.lastRttMs > 0
+                        ? `<span class="${rttColor} fw-semibold">${s.lastRttMs.toFixed(0)}ms</span>`
+                        : '<span class="text-muted">—</span>';
+                    const jitCell  = s.jitterMs > 0
+                        ? `<span class="text-secondary">${s.jitterMs.toFixed(1)}ms</span>`
+                        : '<span class="text-muted">—</span>';
+                    const authBadge = s.isAuthenticated
+                        ? '<span class="badge bg-success" style="font-size:.68rem"><i class="bi bi-check-circle me-1"></i>Auth</span>'
+                        : '<span class="badge bg-secondary" style="font-size:.68rem">Guest</span>';
+                    const roomCell = s.currentRoomId
+                        ? `<span class="mono" style="font-size:.72rem">${s.currentRoomId.substring(0, 8)}…</span>`
+                        : '<span class="text-muted">—</span>';
+                    return `<tr>
+                        <td><i class="bi bi-person me-1 text-secondary"></i>${s.playerName}</td>
+                        <td class="mono text-secondary" style="font-size:.72rem">${s.id.substring(0, 8)}…</td>
+                        <td>${authBadge}</td>
+                        <td class="text-secondary">${roomCell}</td>
+                        <td style="font-size:.78rem">${rttCell}</td>
+                        <td style="font-size:.78rem">${jitCell}</td>
+                        <td class="text-secondary" style="font-size:.78rem">${s.lastActivity} UTC</td>
+                    </tr>`;
+                }).join('');
+            })
+            .catch(() => {});
+    }
+
+    // Kick off immediately, then every 5 s
     refreshStats();
     refreshMetrics();
-    setInterval(refreshStats,   5000);
-    setInterval(refreshMetrics, 5000);
+    refreshSessions();
+    setInterval(refreshStats,    5000);
+    setInterval(refreshMetrics,  5000);
+    setInterval(refreshSessions, 5000);
 }());
 </script>
 }

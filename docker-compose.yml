@@ -1,0 +1,25 @@
+services:
+  mp-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: mp-server:latest
+    restart: unless-stopped
+    ports:
+      - "7777:7777/tcp"
+      - "7778:7778/udp"
+      - "8080:8080/tcp"
+    volumes:
+      - ./logs:/app/logs
+    environment:
+      # These override the matching appsettings.json values (__ = config section separator).
+      # Uncomment and edit as needed — the defaults in appsettings.json are used otherwise.
+      #
+      # ServerSettings__TcpPort: "7777"
+      # ServerSettings__UdpPort: "7778"
+      # ServerSettings__UseTls: "true"
+      # ServerSettings__PublicIP: "0.0.0.0"
+      # ServerSettings__Hostname: "mp-server"
+      # SecurityConfig__UdpSharedSecret: "change-me-before-deploying"
+      # ConnectionStrings__DefaultConnection: "Server=192.168.1.209;Database=mpserver;User=root;Password=...;Port=3306;"
+      DOTNET_ENVIRONMENT: Production
