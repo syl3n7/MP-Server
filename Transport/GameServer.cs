@@ -627,16 +627,20 @@ public sealed class GameServer : IHostedService, IDisposable, ITransportServer
         foreach (var player in room.Players)
         {
             if (player.Id == excludeSessionId) continue;
-            if (player.UdpEndpoint == null) continue;
+
+            if (!_sessions.TryGetValue(player.Id, out PlayerSession? receiverSession) ||
+                receiverSession == null ||
+                !receiverSession.IsAuthenticated ||
+                receiverSession.UdpEndpoint == null)
+                continue;
 
             try
             {
-                if (_sessions.TryGetValue(player.Id, out PlayerSession? receiverSession) &&
-                    receiverSession?.UdpCrypto != null && receiverSession.IsAuthenticated)
+                if (receiverSession.UdpCrypto != null)
                 {
                     byte[] encryptedPacket = receiverSession.UdpCrypto.CreatePacket(message);
                     if (_udpListener != null)
-                        await _udpListener.SendToAsync(encryptedPacket, player.UdpEndpoint, ct);
+                        await _udpListener.SendToAsync(encryptedPacket, receiverSession.UdpEndpoint, ct);
                     _logger.LogDebug("📤🔐 UDP encrypted → {ReceiverId}", player.Id);
                 }
                 else
@@ -644,7 +648,7 @@ public sealed class GameServer : IHostedService, IDisposable, ITransportServer
                     string json = JsonSerializer.Serialize(message) + "\n";
                     byte[] bytes = Encoding.UTF8.GetBytes(json);
                     if (_udpListener != null)
-                        await _udpListener.SendToAsync(bytes, player.UdpEndpoint, ct);
+                        await _udpListener.SendToAsync(bytes, receiverSession.UdpEndpoint, ct);
                     _logger.LogDebug("📤 UDP plain → {ReceiverId}", player.Id);
                 }
             }
