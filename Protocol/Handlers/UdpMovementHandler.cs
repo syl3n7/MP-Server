@@ -58,10 +58,15 @@ public sealed class UdpMovementHandler : ICommandHandler
         else
             room.UpdatePlayerPosition(playerInfo);
 
+        // Forward the original seq so the client's out-of-order filter works correctly.
+        // Without seq the client defaults to 0 every time and drops all packets after the first.
+        var seq = e.Raw.TryGetProperty("seq", out var seqEl) ? seqEl.GetInt32() : 0;
+
         var updateMsg = new
         {
             command   = "UPDATE",
             sessionId = playerInfo.Id,
+            seq       = seq,
             position  = new { x = playerInfo.Position.X, y = playerInfo.Position.Y, z = playerInfo.Position.Z },
             rotation  = new { x = playerInfo.Rotation.X, y = playerInfo.Rotation.Y, z = playerInfo.Rotation.Z, w = playerInfo.Rotation.W }
         };
