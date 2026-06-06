@@ -527,5 +527,48 @@ namespace MP.Server.Services
                 _logger.LogError(ex, "Failed to perform automatic log cleanup");
             }
         }
+
+        /// <summary>
+        /// Wipes all rows from every table — logs, users, sessions, auth tokens, audit logs.
+        /// Uses ExecuteDeleteAsync (EF Core 7+) so each table is cleared with a single SQL
+        /// DELETE FROM statement — no memory load, no command timeout.
+        /// Intended for test environment resets only.
+        /// </summary>
+        public async Task<Dictionary<string, int>> WipeAllDataAsync()
+        {
+            using var scope = _scopeFactory.CreateScope();
+            var context = scope.ServiceProvider.GetRequiredService<UserDbContext>();
+
+            // Count first (fast) so we can report what was there
+            var counts = new Dictionary<string, int>
+            {
+                ["users"]            = await context.Users.CountAsync(),
+                ["userSessions"]     = await context.UserSessions.CountAsync(),
+                ["userAuthTokens"]   = await context.UserAuthTokens.CountAsync(),
+                ["passwordResets"]   = await context.PasswordResetRequests.CountAsync(),
+                ["loginAuditLogs"]   = await context.LoginAuditLogs.CountAsync(),
+                ["serverLogs"]       = await context.ServerLogs.CountAsync(),
+                ["connectionLogs"]   = await context.ConnectionLogs.CountAsync(),
+                ["securityLogs"]     = await context.SecurityLogs.CountAsync(),
+                ["roomActivityLogs"] = await context.RoomActivityLogs.CountAsync(),
+            };
+
+            // Delete in FK-safe order using a single DELETE FROM per table
+            // (ExecuteDeleteAsync generates "DELETE FROM <table>" — no row-by-row EF tracking)
+            await context.UserAuthTokens.ExecuteDeleteAsync();
+            await context.PasswordResetRequests.ExecuteDeleteAsync();
+            await context.UserSessions.ExecuteDeleteAsync();
+            await context.LoginAuditLogs.ExecuteDeleteAsync();
+            await context.ServerLogs.ExecuteDeleteAsync();
+            await context.ConnectionLogs.ExecuteDeleteAsync();
+            await context.SecurityLogs.ExecuteDeleteAsync();
+            await context.RoomActivityLogs.ExecuteDeleteAsync();
+            await context.Users.ExecuteDeleteAsync();
+
+            _logger.LogWarning("Database wiped. Rows deleted: {Counts}",
+                string.Join(", ", counts.Select(kv => $"{kv.Key}={kv.Value}")));
+
+            return counts;
+        }
     }
 }

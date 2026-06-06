@@ -162,6 +162,7 @@
     .info-row .ik { color: var(--muted); }
     .info-row .iv { font-weight: 600; }    /* ── Export button ────────────────────────────────────────────────────── */
     .btn-export {
+        cursor: pointer;
         font-size: .65rem; padding: .2rem .55rem;
         background: var(--border); color: var(--muted);
         border: 1px solid var(--border); border-radius: .35rem;
@@ -183,6 +184,9 @@
         <span style="font-size:.8rem; color:var(--muted)">@(Model.IsOnline ? "Online" : "Offline")</span>
     </div>
     <div class="ms-auto d-flex align-items-center gap-3">
+        <button class="btn-export" id="btn-wipe-db" title="Delete all rows from every table (test reset)" style="border-color:var(--red); color:var(--red)">
+            <i class="bi bi-database-x me-1"></i>Wipe DB
+        </button>
         <span class="refresh-badge" id="last-refresh">
             <i class="bi bi-arrow-repeat me-1"></i>Loading…
         </span>
@@ -334,7 +338,17 @@
     </div>
     <!-- ── Row 2b: Performance Metrics ────────────────────────────────── -->
     <div class="section-card mb-3">
-        <div class="section-header"><i class="bi bi-cpu"></i> Performance Metrics <small class="text-secondary ms-2" style="font-size:.7rem">updated every 5 s</small></div>
+        <div class="section-header">
+            <span><i class="bi bi-cpu"></i> Performance Metrics <small class="text-secondary ms-2" style="font-size:.7rem">updated every 5 s</small></span>
+            <span style="margin-left:auto; display:flex; gap:.5rem; align-items:center">
+                <button class="btn-export" id="btn-export-metrics" title="Download in-memory history as CSV">
+                    <i class="bi bi-download me-1"></i>Export CSV
+                </button>
+                <button class="btn-export" id="btn-reset-metrics" title="Start a new run tag for the next test" style="border-color:var(--red); color:var(--red)">
+                    <i class="bi bi-arrow-counterclockwise me-1"></i>Reset Run
+                </button>
+            </span>
+        </div>
         <div class="row g-0 px-3 py-2">
             <div class="col-6 col-md-3 col-lg-2 py-2 pe-3">
                 <div style="font-size:.72rem; color:var(--muted)">CPU</div>
@@ -751,6 +765,63 @@
             })
             .catch(() => {});
     }
+
+    // ── Wipe DB button ─────────────────────────────────────────────────────
+    document.getElementById('btn-wipe-db').addEventListener('click', function () {
+        if (!confirm(
+            '⚠️  WIPE DATABASE?\n\n' +
+            'This deletes ALL rows from every table:\n' +
+            '  • Users & sessions\n' +
+            '  • Server / connection / security / room logs\n' +
+            '  • Login audit & auth tokens\n\n' +
+            'This cannot be undone. Continue?'
+        )) return;
+        fetch('/Dashboard/WipeDatabase', { method: 'POST' })
+            .then(r => r.json())
+            .then(d => {
+                if (!d.ok) { alert('Error: ' + d.error); return; }
+                const lines = Object.entries(d.deleted)
+                    .map(([k, v]) => `  ${k}: ${v} rows`).join('\n');
+                alert('Database wiped.\n\n' + lines);
+            })
+            .catch(() => alert('Request failed.'));
+    });
+
+    // ── Export CSV button ─────────────────────────────────────────────────────
+    document.getElementById('btn-export-metrics').addEventListener('click', function () {
+        fetch('/Dashboard/MetricsHistory')
+            .then(r => r.json())
+            .then(data => {
+                if (!data || data.length === 0) {
+                    alert('No metrics samples yet — wait at least 5 s after server start.');
+                    return;
+                }
+                const headers = Object.keys(data[0]);
+                const rows    = [headers.join(',')];
+                for (const row of data)
+                    rows.push(headers.map(h => row[h] ?? '').join(','));
+                const csv  = rows.join('\n');
+                const blob = new Blob([csv], { type: 'text/csv' });
+                const url  = URL.createObjectURL(blob);
+                const a    = document.createElement('a');
+                a.href     = url;
+                a.download = 'custom_metrics_' +
+                    new Date().toISOString().replace(/[:.]/g, '_') + '.csv';
+                a.click();
+                URL.revokeObjectURL(url);
+            })
+            .catch(() => alert('Failed to fetch metrics history.'));
+    });
+
+    // ── Reset Run button ──────────────────────────────────────────────────────
+    document.getElementById('btn-reset-metrics').addEventListener('click', function () {
+        if (!confirm('Reset run tag?\n\nA new tag starts immediately — useful to mark the beginning of a clean test.\nExisting CSV data on disk is preserved (rows just get a new tag).'))
+            return;
+        fetch('/Dashboard/ResetMetrics', { method: 'POST' })
+            .then(r => r.json())
+            .then(d => alert('New run tag: ' + d.runTag))
+            .catch(() => alert('Failed to reset run tag.'));
+    });
 
     // Kick off immediately, then every 5 s
     refreshStats();

@@ -123,11 +123,15 @@ public sealed class ConsoleUiService : BackgroundService
 {
     private readonly GameServer _server;
     private readonly IHostApplicationLifetime _lifetime;
+    private readonly MetricsService _metrics;
+    private readonly DatabaseLoggingService _logging;
 
-    public ConsoleUiService(GameServer server, IHostApplicationLifetime lifetime)
+    public ConsoleUiService(GameServer server, IHostApplicationLifetime lifetime, MetricsService metrics, DatabaseLoggingService logging)
     {
-        _server  = server;
+        _server   = server;
         _lifetime = lifetime;
+        _metrics  = metrics;
+        _logging  = logging;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -136,7 +140,7 @@ public sealed class ConsoleUiService : BackgroundService
         await Task.Delay(500, stoppingToken).ConfigureAwait(false);
 
         var cts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
-        var ui  = new ConsoleUI(_server, cts);
+        var ui  = new ConsoleUI(_server, cts, _metrics, _logging);
 
         try
         {

@@ -7,6 +7,7 @@ using Microsoft.Extensions.Logging;
 using MP.Server.Testing;
 using MP.Server.Diagnostics;
 using MP.Server.Transport;
+using MP.Server.Services;
 
 namespace MP.Server.Observability;
 
@@ -14,11 +15,15 @@ public class ConsoleUI
 {
     private readonly GameServer _server;
     private readonly CancellationTokenSource _serverCts;
+    private readonly MetricsService _metrics;
+    private readonly DatabaseLoggingService _logging;
 
-    public ConsoleUI(GameServer server, CancellationTokenSource serverCts)
+    public ConsoleUI(GameServer server, CancellationTokenSource serverCts, MetricsService metrics, DatabaseLoggingService logging)
     {
-        _server = server;
+        _server    = server;
         _serverCts = serverCts;
+        _metrics   = metrics;
+        _logging   = logging;
     }
 
     public async Task RunAsync(CancellationToken ct)
@@ -57,6 +62,18 @@ public class ConsoleUI
                     
                 case "logs":
                     await ShowRecentLogs();
+                    break;
+                    
+                case "export-metrics":
+                    ShowMetricsExport();
+                    break;
+
+                case "reset-metrics":
+                    ResetMetrics();
+                    break;
+
+                case "wipe-db":
+                    await WipeDatabaseAsync();
                     break;
                     
                 case "clear":
@@ -101,18 +118,69 @@ public class ConsoleUI
     private void PrintHelp()
     {
         Console.WriteLine("Available commands:");
-        Console.WriteLine("  help        - Show this help message");
-        Console.WriteLine("  rooms       - List all game rooms");
-        Console.WriteLine("  sessions    - List all active player sessions");
-        Console.WriteLine("  stats       - Show server statistics");
-        Console.WriteLine("  logs        - Show recent server logs");
-        Console.WriteLine("  clear       - Clear console screen");
-        Console.WriteLine("  config      - Show server configuration");
-        Console.WriteLine("  kick        - Kick a player by ID");
-        Console.WriteLine("  test-wan    - Test WAN connectivity (89.114.116.19:443)");
-        Console.WriteLine("  test-lan    - Test LAN connectivity (192.168.3.123:443)");
-        Console.WriteLine("  network-info- Show network interface information");
-        Console.WriteLine("  quit        - Shut down the server");
+        Console.WriteLine("  help           - Show this help message");
+        Console.WriteLine("  rooms          - List all game rooms");
+        Console.WriteLine("  sessions       - List all active player sessions");
+        Console.WriteLine("  stats          - Show server statistics");
+        Console.WriteLine("  logs           - Show recent server logs");
+        Console.WriteLine("  export-metrics - Show CSV path and current RTT/jitter summary");
+        Console.WriteLine("  reset-metrics  - Start a new metrics run tag (for clean test separation)");
+        Console.WriteLine("  wipe-db        - Delete ALL rows from every table (full test reset)");
+        Console.WriteLine("  clear          - Clear console screen");
+        Console.WriteLine("  config         - Show server configuration");
+        Console.WriteLine("  kick           - Kick a player by ID");
+        Console.WriteLine("  test-wan       - Test WAN connectivity (89.114.116.19:443)");
+        Console.WriteLine("  test-lan       - Test LAN connectivity (192.168.3.123:443)");
+        Console.WriteLine("  network-info   - Show network interface information");
+        Console.WriteLine("  quit           - Shut down the server");
+    }
+
+    private async Task WipeDatabaseAsync()
+    {
+        Console.Write("WARNING: This will delete ALL rows from every table (users, sessions, logs). Type 'yes' to confirm: ");
+        var confirm = await Task.Run(() => Console.ReadLine());
+        if (confirm?.Trim().ToLower() != "yes")
+        {
+            Console.WriteLine("Cancelled.");
+            return;
+        }
+        Console.WriteLine("Wiping database...");
+        try
+        {
+            var counts = await _logging.WipeAllDataAsync();
+            Console.WriteLine("Done. Rows deleted:");
+            foreach (var kv in counts)
+                Console.WriteLine($"  {kv.Key,-22} {kv.Value}");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error: {ex.Message}");
+        }
+    }
+
+    private void ShowMetricsExport()
+    {
+        Console.WriteLine($"CSV file:   {System.IO.Path.GetFullPath(_metrics.CsvPath)}");
+        Console.WriteLine($"Run tag:    {_metrics.RunTag}");
+        var history = _metrics.GetHistory();
+        if (history.Count == 0)
+        {
+            Console.WriteLine("No samples yet (server just started).");
+            return;
+        }
+        var snap = _metrics.Current;
+        Console.WriteLine($"Samples:    {history.Count} ({history.Count * 5}s of history, up to 25 min)");
+        Console.WriteLine($"Players:    {snap.PlayerCount} with active RTT data");
+        Console.WriteLine($"Avg RTT:    {snap.AvgRttMs:F1} ms  (min {snap.MinRttMs:F1} / max {snap.MaxRttMs:F1})");
+        Console.WriteLine($"Avg Jitter: {snap.AvgJitterMs:F1} ms  (max {snap.MaxJitterMs:F1})");
+        Console.WriteLine("Use the dashboard Export CSV button, or hit /Dashboard/MetricsHistory directly.");
+    }
+
+    private void ResetMetrics()
+    {
+        _metrics.Reset();
+        Console.WriteLine($"Metrics run tag reset. New tag: {_metrics.RunTag}");
+        Console.WriteLine("Subsequent CSV rows will carry the new tag. History in memory is unchanged.");
     }
 
     private void ListRooms()

@@ -259,7 +259,7 @@ public class DashboardController : Controller
         return Json(sessions);
     }
 
-    // GET /Dashboard/MetricsHistory  (returns full 5-min ring buffer for export/analysis)
+    // GET /Dashboard/MetricsHistory  (returns full 25-min ring buffer for export/analysis)
     [HttpGet]
     public IActionResult MetricsHistory()
     {
@@ -277,8 +277,35 @@ public class DashboardController : Controller
             bytesReceivedPerSec = s.BytesReceivedPerSec,
             avgRttMs            = s.AvgRttMs,
             avgJitterMs         = s.AvgJitterMs,
+            playerCount         = s.PlayerCount,
+            maxRttMs            = s.MaxRttMs,
+            minRttMs            = s.MinRttMs,
+            maxJitterMs         = s.MaxJitterMs,
         });
         return Json(history);
+    }
+
+    // POST /Dashboard/ResetMetrics  (starts a new run tag for CSV export)
+    [HttpPost]
+    public IActionResult ResetMetrics()
+    {
+        _metrics.Reset();
+        return Json(new { ok = true, runTag = _metrics.RunTag });
+    }
+
+    // POST /Dashboard/WipeDatabase  (deletes all rows from all tables — test reset only)
+    [HttpPost]
+    public async Task<IActionResult> WipeDatabase()
+    {
+        try
+        {
+            var counts = await _loggingService.WipeAllDataAsync();
+            return Json(new { ok = true, deleted = counts });
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { ok = false, error = ex.Message });
+        }
     }
 
     // GET /Dashboard/ExportLogs?type=connection&format=json&from=2026-05-01&to=2026-05-22
